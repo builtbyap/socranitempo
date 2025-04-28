@@ -93,12 +93,14 @@ export default function FeaturesPage() {
 
           <div className="mt-16 text-center">
             <h2 className="text-2xl font-bold mb-6">Ready to get started?</h2>
-            <Link href="/pricing">
-              <Button className="px-6 py-3 text-lg flex items-center">
-                View Pricing
-                <ArrowRight className="ml-2 w-5 h-5" />
-              </Button>
-            </Link>
+            <div className="flex justify-center">
+              <Link href="/pricing">
+                <Button className="px-6 py-3 text-lg flex items-center">
+                  View Pricing
+                  <ArrowRight className="ml-2 w-5 h-5" />
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
       </section>
