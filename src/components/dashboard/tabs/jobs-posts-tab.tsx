@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "../../../../supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SavedPostsTab from "./saved-posts-tab";
+import { toast } from "@/components/ui/use-toast";
 
 type JobPost = {
   id: string;
@@ -21,6 +22,7 @@ type JobPost = {
   company: string;
   location: string;
   posted_date: string;
+  application?: string;
 };
 
 export default function JobsPostsTab() {
@@ -30,6 +32,27 @@ export default function JobsPostsTab() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Function to check if a URL is valid and accessible
+  const checkUrlValidity = async (url: string): Promise<boolean> => {
+    if (!url) return false;
+
+    try {
+      // Use a simple HEAD request to check if the URL is accessible
+      const response = await fetch(url, {
+        method: "HEAD",
+        mode: "no-cors", // This is needed for cross-origin requests
+        cache: "no-cache",
+      });
+
+      // Since we're using no-cors, we can't actually check the status
+      // But if the fetch doesn't throw an error, we'll assume it's valid
+      return true;
+    } catch (error) {
+      console.error(`Error checking URL ${url}:`, error);
+      return false;
+    }
+  };
 
   useEffect(() => {
     const fetchJobPosts = async () => {
@@ -42,17 +65,48 @@ export default function JobsPostsTab() {
           throw new Error(error.message);
         }
 
-        setJobPosts(data || []);
+        if (data && data.length > 0) {
+          // Filter out posts with invalid application URLs
+          const validatedPosts = [];
+          let invalidCount = 0;
 
-        // Load saved posts from localStorage
-        const savedPostsIds = JSON.parse(
-          localStorage.getItem("savedJobPosts") || "[]",
-        );
-        if (data) {
-          const savedItems = data.filter((post) =>
+          for (const post of data) {
+            // If there's no application URL, keep the post
+            if (!post.application) {
+              validatedPosts.push(post);
+              continue;
+            }
+
+            // Check if the URL is valid
+            const isValid = await checkUrlValidity(post.application);
+            if (isValid) {
+              validatedPosts.push(post);
+            } else {
+              invalidCount++;
+            }
+          }
+
+          setJobPosts(validatedPosts);
+
+          if (invalidCount > 0) {
+            toast({
+              title: "Some job posts were filtered out",
+              description: `${invalidCount} job posts with invalid application URLs were removed.`,
+              duration: 5000,
+            });
+          }
+
+          // Load saved posts from localStorage
+          const savedPostsIds = JSON.parse(
+            localStorage.getItem("savedJobPosts") || "[]",
+          );
+
+          const savedItems = validatedPosts.filter((post) =>
             savedPostsIds.includes(post.id),
           );
           setSavedPosts(savedItems);
+        } else {
+          setJobPosts([]);
         }
       } catch (err) {
         console.error("Error fetching job posts:", err);
@@ -128,7 +182,13 @@ export default function JobsPostsTab() {
               </CardContent>
               <CardFooter>
                 <div className="flex w-full gap-2">
-                  <Button size="sm" className="flex-1">
+                  <Button
+                    size="sm"
+                    className="flex-1"
+                    onClick={() =>
+                      job.application && window.open(job.application, "_blank")
+                    }
+                  >
                     View Details
                   </Button>
                   <Button

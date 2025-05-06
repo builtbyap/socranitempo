@@ -15,7 +15,7 @@ export default async function Navbar() {
     <nav className="w-full border-b border-gray-200 bg-white py-2">
       <div className="container mx-auto px-4 flex justify-between items-center">
         <Link href="/" prefetch className="text-xl font-bold">
-          Logo
+          Socrani
         </Link>
         <div className="flex gap-4 items-center">
           <Link
