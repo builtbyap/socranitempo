@@ -1,3 +1,5 @@
+"use client";
+
 import Footer from "@/components/footer";
 import Navbar from "@/components/navbar";
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,7 @@ import Link from "next/link";
 export default function FeaturesPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
-      <Navbar />
+      <Navbar user={null} />
 
       <section className="py-20">
         <div className="container mx-auto px-4">
