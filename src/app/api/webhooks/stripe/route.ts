@@ -4,7 +4,7 @@ import Stripe from "stripe";
 import { supabase } from "@/lib/supabase";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-02-24.acacia",
+  apiVersion: "2023-10-16",
 });
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     const signature = headers().get("stripe-signature");
 
     if (!signature) {
-      console.error("No Stripe signature found in headers");
+      console.error("No Stripe signature found");
       return NextResponse.json(
         { error: "No signature found" },
         { status: 400 }
@@ -29,7 +29,7 @@ export async function POST(req: Request) {
     } catch (err) {
       console.error("Webhook signature verification failed:", err);
       return NextResponse.json(
-        { error: "Invalid signature" },
+        { error: "Webhook signature verification failed" },
         { status: 400 }
       );
     }
@@ -39,95 +39,43 @@ export async function POST(req: Request) {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
-        
-        if (!session.customer_email) {
-          console.error("No customer email found in session");
+        const customerId = session.customer as string;
+        const subscriptionId = session.subscription as string;
+
+        console.log("Processing checkout session:", {
+          customerId,
+          subscriptionId,
+          userId: session.client_reference_id,
+        });
+
+        if (!session.client_reference_id) {
+          console.error("No user ID found in session");
           return NextResponse.json(
-            { error: "No customer email found" },
+            { error: "No user ID found" },
             { status: 400 }
           );
         }
 
-        const customerId = session.customer as string;
-        const subscriptionId = session.subscription as string;
+        const { error: updateError } = await supabase
+          .from("subs")
+          .update({
+            stripe_customer_id: customerId,
+            stripe_subscription_id: subscriptionId,
+            subscription_status: "active",
+            subscription_end_date: new Date(
+              (session.subscription as any).current_period_end * 1000
+            ).toISOString(),
+          })
+          .eq("id", session.client_reference_id);
 
-        console.log("Processing checkout completion:", {
-          customerId,
-          subscriptionId,
-          customerEmail: session.customer_email
-        });
-
-        try {
-          // Get the subscription details
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-          console.log("Subscription details:", subscription);
-
-          // First, check if the user exists
-          const { data: existingUser, error: userError } = await supabase
-            .from("subs")
-            .select("id")
-            .eq("email", session.customer_email)
-            .single();
-
-          if (userError && userError.code !== "PGRST116") {
-            console.error("Error checking existing user:", userError);
-            return NextResponse.json(
-              { error: "Failed to check existing user" },
-              { status: 500 }
-            );
-          }
-
-          if (!existingUser) {
-            console.log("Creating new subscription record for:", session.customer_email);
-            // Create new subscription record
-            const { error: insertError } = await supabase
-              .from("subs")
-              .insert({
-                id: session.customer_email,
-                email: session.customer_email,
-                subscription_status: "active",
-                subscription_end_date: new Date(subscription.current_period_end * 1000).toISOString(),
-                stripe_customer_id: customerId,
-                stripe_subscription_id: subscriptionId,
-              });
-
-            if (insertError) {
-              console.error("Error creating subscription record:", insertError);
-              return NextResponse.json(
-                { error: "Failed to create subscription record" },
-                { status: 500 }
-              );
-            }
-          } else {
-            console.log("Updating existing subscription for:", session.customer_email);
-            // Update existing subscription
-            const { error: updateError } = await supabase
-              .from("subs")
-              .update({
-                subscription_status: "active",
-                subscription_end_date: new Date(subscription.current_period_end * 1000).toISOString(),
-                stripe_customer_id: customerId,
-                stripe_subscription_id: subscriptionId,
-              })
-              .eq("email", session.customer_email);
-
-            if (updateError) {
-              console.error("Error updating subscription:", updateError);
-              return NextResponse.json(
-                { error: "Failed to update subscription" },
-                { status: 500 }
-              );
-            }
-          }
-
-          console.log("Successfully processed subscription");
-        } catch (error) {
-          console.error("Error processing subscription:", error);
+        if (updateError) {
+          console.error("Error updating user subscription:", updateError);
           return NextResponse.json(
-            { error: "Failed to process subscription" },
+            { error: "Failed to update subscription" },
             { status: 500 }
           );
         }
+
         break;
       }
 
@@ -137,34 +85,42 @@ export async function POST(req: Request) {
 
         console.log("Processing subscription update:", {
           customerId,
-          status: subscription.status
+          subscriptionId: subscription.id,
+          status: subscription.status,
         });
 
-        try {
-          const { error } = await supabase
-            .from("subs")
-            .update({
-              subscription_status: subscription.status === "active" ? "active" : "cancelled",
-              subscription_end_date: new Date(subscription.current_period_end * 1000).toISOString(),
-            })
-            .eq("stripe_customer_id", customerId);
+        const { data: user, error: fetchError } = await supabase
+          .from("subs")
+          .select("id")
+          .eq("stripe_customer_id", customerId)
+          .single();
 
-          if (error) {
-            console.error("Error updating subscription status:", error);
-            return NextResponse.json(
-              { error: "Failed to update subscription status" },
-              { status: 500 }
-            );
-          }
-
-          console.log("Successfully updated subscription status");
-        } catch (error) {
-          console.error("Error processing subscription update:", error);
+        if (fetchError || !user) {
+          console.error("Error fetching user:", fetchError);
           return NextResponse.json(
-            { error: "Failed to process subscription update" },
+            { error: "User not found" },
+            { status: 404 }
+          );
+        }
+
+        const { error: updateError } = await supabase
+          .from("subs")
+          .update({
+            subscription_status: subscription.status,
+            subscription_end_date: new Date(
+              subscription.current_period_end * 1000
+            ).toISOString(),
+          })
+          .eq("id", user.id);
+
+        if (updateError) {
+          console.error("Error updating subscription:", updateError);
+          return NextResponse.json(
+            { error: "Failed to update subscription" },
             { status: 500 }
           );
         }
+
         break;
       }
 
@@ -172,40 +128,48 @@ export async function POST(req: Request) {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
 
-        console.log("Processing subscription deletion:", { customerId });
+        console.log("Processing subscription deletion:", {
+          customerId,
+          subscriptionId: subscription.id,
+        });
 
-        try {
-          const { error } = await supabase
-            .from("subs")
-            .update({
-              subscription_status: "cancelled",
-              subscription_end_date: new Date().toISOString(),
-            })
-            .eq("stripe_customer_id", customerId);
+        const { data: user, error: fetchError } = await supabase
+          .from("subs")
+          .select("id")
+          .eq("stripe_customer_id", customerId)
+          .single();
 
-          if (error) {
-            console.error("Error cancelling subscription:", error);
-            return NextResponse.json(
-              { error: "Failed to cancel subscription" },
-              { status: 500 }
-            );
-          }
-
-          console.log("Successfully cancelled subscription");
-        } catch (error) {
-          console.error("Error processing subscription deletion:", error);
+        if (fetchError || !user) {
+          console.error("Error fetching user:", fetchError);
           return NextResponse.json(
-            { error: "Failed to process subscription deletion" },
+            { error: "User not found" },
+            { status: 404 }
+          );
+        }
+
+        const { error: updateError } = await supabase
+          .from("subs")
+          .update({
+            subscription_status: "inactive",
+            subscription_end_date: new Date().toISOString(),
+          })
+          .eq("id", user.id);
+
+        if (updateError) {
+          console.error("Error updating subscription:", updateError);
+          return NextResponse.json(
+            { error: "Failed to update subscription" },
             { status: 500 }
           );
         }
+
         break;
       }
     }
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    console.error("Error processing webhook:", error);
+    console.error("Webhook error:", error);
     return NextResponse.json(
       { error: "Webhook handler failed" },
       { status: 500 }
