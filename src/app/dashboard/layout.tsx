@@ -16,7 +16,14 @@ export default function DashboardLayout({
   useEffect(() => {
     const checkSubscription = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error("Error getting session:", sessionError);
+          toast.error("Error checking authentication status");
+          router.push("/sign-in");
+          return;
+        }
         
         if (!session) {
           console.log("No session found, redirecting to sign-in");
@@ -26,22 +33,30 @@ export default function DashboardLayout({
 
         console.log("Checking subscription for user:", session.user.id);
 
-        const { data: user, error } = await supabase
+        const { data: user, error: subscriptionError } = await supabase
           .from("subs")
           .select("subscription_status, subscription_end_date")
           .eq("id", session.user.id)
           .single();
 
-        if (error) {
-          console.error("Error fetching subscription:", error);
+        if (subscriptionError) {
+          console.error("Error fetching subscription:", subscriptionError);
           toast.error("Error checking subscription status");
+          router.push("/pricing");
           return;
         }
 
         console.log("Subscription data:", user);
 
+        if (!user) {
+          console.log("No subscription found for user");
+          toast.error("Please subscribe to access the dashboard");
+          router.push("/pricing");
+          return;
+        }
+
         // Check if subscription is active
-        const isSubscribed = user?.subscription_status === "active";
+        const isSubscribed = user.subscription_status === "active";
         console.log("Is subscribed:", isSubscribed);
 
         if (!isSubscribed) {
