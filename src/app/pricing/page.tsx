@@ -1,109 +1,196 @@
-import Footer from "@/components/footer";
-import Navbar from "@/components/navbar";
+"use client";
+
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check } from "lucide-react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { supabase } from "@/lib/supabase";
 
 export default function PricingPage() {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!auth) return; // Guard against undefined auth
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserId(user.uid);
+      } else {
+        setUserId(null);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleSubscribe = async () => {
+    try {
+      setIsLoading(true);
+      
+      // Open Stripe checkout in a new tab
+      const stripeWindow = window.open(
+        "https://buy.stripe.com/test_fZu8wOaxwdki3ArbQdeUU07",
+        "_blank"
+      );
+
+      if (!stripeWindow) {
+        toast.error("Please allow popups for this website");
+        return;
+      }
+
+      // Check subscription status every 5 seconds
+      const checkSubscription = setInterval(async () => {
+        try {
+          if (!userId) return;
+
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) return;
+
+          const { data: user } = await supabase
+            .from("subs")
+            .select("subscription_status")
+            .eq("id", session.user.id)
+            .single();
+
+          if (user?.subscription_status === "active") {
+            clearInterval(checkSubscription);
+            toast.success("Subscription successful! Redirecting to dashboard...");
+            router.push("/dashboard");
+          }
+        } catch (error) {
+          console.error("Error checking subscription:", error);
+        }
+      }, 5000);
+
+      // Clear interval after 5 minutes (timeout)
+      setTimeout(() => {
+        clearInterval(checkSubscription);
+      }, 5 * 60 * 1000);
+
+    } catch (error) {
+      console.error("Error redirecting to Stripe:", error);
+      toast.error("Failed to process subscription. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
-      <Navbar />
-
-      <section className="py-20">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-16">
-            <h1 className="text-4xl font-bold mb-4">
-              Simple, Transparent Pricing
-            </h1>
-            <p className="text-gray-600 max-w-2xl mx-auto">
-              Choose the plan that works best for you and your team.
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            {/* Monthly Plan */}
-            <div className="bg-white p-8 rounded-xl shadow-md border border-gray-100 flex flex-col h-full">
-              <div className="mb-6">
-                <h3 className="text-lg font-medium text-gray-500">Monthly</h3>
-                <div className="mt-2 flex items-baseline">
-                  <span className="text-4xl font-bold">$15</span>
-                  <span className="ml-1 text-gray-500">/month</span>
-                </div>
-              </div>
-
-              <ul className="space-y-4 mb-8 flex-grow">
-                {[
-                  "Full access to all features",
-                  "Unlimited contacts",
-                  "Priority support",
-                  "Regular updates",
-                  "Cancel anytime",
-                ].map((feature, index) => (
-                  <li key={index} className="flex items-start">
-                    <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                    <span>{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <Link href="/payment?plan=monthly" className="w-full">
-                <Button className="w-full">Subscribe Now</Button>
-              </Link>
-            </div>
-
-            {/* Annual Plan */}
-            <div className="bg-white p-8 rounded-xl shadow-md border border-blue-100 flex flex-col h-full relative overflow-hidden">
-              <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-xs font-medium rounded-bl-lg">
-                Best Value
-              </div>
-
-              <div className="mb-6">
-                <h3 className="text-lg font-medium text-gray-500">Annual</h3>
-                <div className="mt-2 flex items-baseline">
-                  <span className="text-4xl font-bold">$50</span>
-                  <span className="ml-1 text-gray-500">/year</span>
-                </div>
-                <p className="text-sm text-green-600 mt-1">
-                  Save $130 per year
-                </p>
-              </div>
-
-              <ul className="space-y-4 mb-8 flex-grow">
-                {[
-                  "All monthly plan features",
-                  "Unlimited contacts",
-                  "Priority support",
-                  "Regular updates",
-                  "Advanced analytics",
-                  "Dedicated account manager",
-                ].map((feature, index) => (
-                  <li key={index} className="flex items-start">
-                    <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                    <span>{feature}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <Link href="/payment?plan=annual" className="w-full">
-                <Button className="w-full bg-blue-600 hover:bg-blue-700">
-                  Subscribe Now
-                </Button>
-              </Link>
-            </div>
-          </div>
-
-          <div className="mt-12 text-center">
-            <p className="text-gray-500">
-              Need a custom plan for your enterprise?{" "}
-              <a href="#" className="text-blue-600 font-medium">
-                Contact us
-              </a>
-            </p>
-          </div>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-8">
+      <div className="w-full max-w-4xl">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold mb-4">Choose Your Plan</h1>
+          <p className="text-muted-foreground">
+            Get access to all premium features with our subscription plan
+          </p>
         </div>
-      </section>
 
-      <Footer />
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {/* Free Plan */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Free</CardTitle>
+              <CardDescription>Basic features for everyone</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold mb-4">$0</div>
+              <ul className="space-y-2">
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  Basic features
+                </li>
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  Limited access
+                </li>
+              </ul>
+            </CardContent>
+            <CardFooter>
+              <Button variant="outline" className="w-full" disabled>
+                Current Plan
+              </Button>
+            </CardFooter>
+          </Card>
+
+          {/* Premium Plan */}
+          <Card className="border-primary">
+            <CardHeader>
+              <CardTitle>Premium</CardTitle>
+              <CardDescription>Full access to all features</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold mb-4">$15<span className="text-sm font-normal text-muted-foreground">/month</span></div>
+              <ul className="space-y-2">
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  Full dashboard access
+                </li>
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  Premium features
+                </li>
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  Priority support
+                </li>
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  Advanced analytics
+                </li>
+              </ul>
+            </CardContent>
+            <CardFooter>
+              <Button 
+                className="w-full" 
+                onClick={handleSubscribe}
+                disabled={isLoading}
+              >
+                {isLoading ? "Processing..." : "Subscribe Now"}
+              </Button>
+            </CardFooter>
+          </Card>
+
+          {/* Enterprise Plan */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Enterprise</CardTitle>
+              <CardDescription>Custom solutions for businesses</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold mb-4">Custom</div>
+              <ul className="space-y-2">
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  Everything in Premium
+                </li>
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  Custom integrations
+                </li>
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  Dedicated support
+                </li>
+                <li className="flex items-center">
+                  <Check className="h-4 w-4 mr-2 text-green-500" />
+                  SLA guarantees
+                </li>
+              </ul>
+            </CardContent>
+            <CardFooter>
+              <Button variant="outline" className="w-full">
+                Contact Sales
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

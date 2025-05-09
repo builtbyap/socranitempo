@@ -1,7 +1,7 @@
 "use server";
 
 import { encodedRedirect } from "@/utils/utils";
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createClient } from "../../supabase/server";
 
@@ -34,7 +34,6 @@ export const signUpAction = async (formData: FormData) => {
 
   console.log("After signUp", error);
 
-
   if (error) {
     console.error(error.code + " " + error.message);
     return encodedRedirect("error", "/sign-up", error.message);
@@ -51,7 +50,9 @@ export const signUpAction = async (formData: FormData) => {
           email: email,
           user_id: user.id,
           token_identifier: user.id,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          subscription_status: 'pending', // Set initial subscription status
+          subscription_end_date: null
         });
 
       if (updateError) {
@@ -62,10 +63,11 @@ export const signUpAction = async (formData: FormData) => {
     }
   }
 
+  // Redirect to pricing page with a success message
   return encodedRedirect(
     "success",
-    "/sign-up",
-    "Thanks for signing up! Please check your email for a verification link.",
+    "/pricing",
+    "Thanks for signing up! Please choose a subscription plan to continue.",
   );
 };
 
@@ -162,3 +164,118 @@ export const signOutAction = async () => {
   await supabase.auth.signOut();
   return redirect("/sign-in");
 };
+
+export async function getSession() {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session;
+}
+
+export async function getUser() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  return user;
+}
+
+export async function signOut() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+}
+
+export const googleSignInAction = async (idToken: string) => {
+  const supabase = await createClient();
+  const origin = headers().get("origin");
+
+  const { data, error } = await supabase.auth.signInWithIdToken({
+    provider: 'google',
+    token: idToken,
+  });
+
+  if (error) {
+    console.error("Google sign in error:", error);
+    return encodedRedirect("error", "/sign-in", error.message);
+  }
+
+  if (data.user) {
+    try {
+      // Check if user exists in the users table
+      const { data: existingUser } = await supabase
+        .from('users')
+        .select('*')
+        .eq('user_id', data.user.id)
+        .single();
+
+      if (!existingUser) {
+        // Create user profile if it doesn't exist
+        const { error: updateError } = await supabase
+          .from('users')
+          .insert({
+            id: data.user.id,
+            name: data.user.user_metadata.full_name || data.user.email?.split('@')[0],
+            full_name: data.user.user_metadata.full_name,
+            email: data.user.email,
+            user_id: data.user.id,
+            token_identifier: data.user.id,
+            created_at: new Date().toISOString(),
+            subscription_status: 'pending', // Set initial subscription status
+            subscription_end_date: null
+          });
+
+        if (updateError) {
+          console.error('Error creating user profile:', updateError);
+        }
+
+        // If this is a new user, redirect to pricing page
+        return encodedRedirect(
+          "success",
+          "/pricing",
+          "Welcome! Please choose a subscription plan to continue."
+        );
+      }
+
+      // If user exists, check their subscription status
+      if (existingUser.subscription_status === 'cancelled' || !existingUser.subscription_status) {
+        return encodedRedirect(
+          "success",
+          "/pricing",
+          "Please choose a subscription plan to continue."
+        );
+      }
+    } catch (err) {
+      console.error('Error in user profile creation:', err);
+    }
+  }
+
+  // If user has an active subscription, redirect to dashboard
+  return redirect("/dashboard");
+};
+
+export async function cancelSubscriptionAction() {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "Not authenticated" };
+  }
+
+  try {
+    // Update the user's subscription status in the database
+    const { error } = await supabase
+      .from('users')
+      .update({ 
+        subscription_status: 'cancelled',
+        subscription_end_date: new Date().toISOString() // Immediately revoke access
+      })
+      .eq('id', user.id);
+
+    if (error) throw error;
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error cancelling subscription:', error);
+    return { error: "Failed to cancel subscription" };
+  }
+}

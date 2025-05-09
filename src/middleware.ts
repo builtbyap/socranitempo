@@ -1,36 +1,37 @@
-import { createServerClient } from '@supabase/ssr'
+import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next()
+  const supabase = createMiddlewareClient({ req, res })
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return req.cookies.getAll().map(({ name, value }) => ({
-            name,
-            value,
-          }))
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            req.cookies.set(name, value)
-            res.cookies.set(name, value, options)
-          })
-        },
-      },
+  // Check if we have a session
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  // If no session, redirect to sign-in
+  if (!session) {
+    return NextResponse.redirect(new URL('/sign-in', req.url))
+  }
+
+  // If accessing dashboard, check subscription status
+  if (req.nextUrl.pathname.startsWith('/dashboard')) {
+    const { data: user } = await supabase
+      .from('users')
+      .select('subscription_status, subscription_end_date')
+      .eq('id', session.user.id)
+      .single()
+
+    const isSubscribed = 
+      user?.subscription_status === 'active' && 
+      user?.subscription_end_date && 
+      new Date(user.subscription_end_date) > new Date()
+
+    if (!isSubscribed) {
+      return NextResponse.redirect(new URL('/pricing', req.url))
     }
-  )
-
-  // Refresh session if expired - required for Server Components
-  const { data: { session }, error } = await supabase.auth.getSession()
-
-  if (error) {
-    console.error('Auth session error:', error)
   }
 
   return res
@@ -38,14 +39,5 @@ export async function middleware(req: NextRequest) {
 
 // Ensure the middleware is only called for relevant paths
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public (public files)
-     */
-    '/((?!_next/static|_next/image|favicon.ico|public|api).*)',
-  ],
+  matcher: ['/dashboard/:path*'],
 }
