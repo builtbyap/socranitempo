@@ -1,31 +1,47 @@
-export const dynamic = 'force-dynamic';
-
 import { NextResponse } from "next/server";
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
+import { createClient } from "../../../../supabase/server";
 
 export async function GET(request: Request) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get("userId");
 
-    if (userError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!userId) {
+      return NextResponse.json(
+        { error: "User ID is required" },
+        { status: 400 }
+      );
     }
 
-    const { data: subscription, error: subscriptionError } = await supabase
-      .from("subscriptions")
-      .select("*")
-      .eq("user_id", user.id)
+    const supabase = await createClient();
+
+    // Get user's subscription status from the database
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("subscription_status, subscription_end_date")
+      .eq("id", userId)
       .single();
 
-    if (subscriptionError) {
-      return NextResponse.json({ error: "Failed to fetch subscription" }, { status: 500 });
+    if (error) {
+      console.error("Error fetching subscription status:", error);
+      return NextResponse.json(
+        { error: "Failed to fetch subscription status" },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ subscription });
+    // Check if subscription is active
+    const isSubscribed = 
+      user.subscription_status === "active" && 
+      user.subscription_end_date && 
+      new Date(user.subscription_end_date) > new Date();
+
+    return NextResponse.json({ isSubscribed });
   } catch (error) {
     console.error("Error in check-subscription route:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 } 

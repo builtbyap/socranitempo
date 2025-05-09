@@ -16,60 +16,33 @@ export default function DashboardLayout({
   useEffect(() => {
     const checkSubscription = async () => {
       try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error("Error getting session:", sessionError);
-          toast.error("Error checking authentication status");
-          router.push("/sign-in");
-          return;
-        }
+        const { data: { session } } = await supabase.auth.getSession();
         
         if (!session) {
-          console.log("No session found, redirecting to sign-in");
           router.push("/sign-in");
           return;
         }
 
-        console.log("Checking subscription for user:", session.user.id);
-
-        const { data: user, error: subscriptionError } = await supabase
+        const { data: user } = await supabase
           .from("subs")
           .select("subscription_status, subscription_end_date")
           .eq("id", session.user.id)
           .single();
 
-        if (subscriptionError) {
-          console.error("Error fetching subscription:", subscriptionError);
-          toast.error("Error checking subscription status");
-          router.push("/pricing");
-          return;
-        }
-
-        console.log("Subscription data:", user);
-
-        if (!user) {
-          console.log("No subscription found for user");
-          toast.error("Please subscribe to access the dashboard");
-          router.push("/pricing");
-          return;
-        }
-
-        // Check if subscription is active
-        const isSubscribed = user.subscription_status === "active";
-        console.log("Is subscribed:", isSubscribed);
+        const isSubscribed = 
+          user?.subscription_status === "active" && 
+          user?.subscription_end_date && 
+          new Date(user.subscription_end_date) > new Date();
 
         if (!isSubscribed) {
-          console.log("No active subscription, redirecting to pricing");
           toast.error("Please subscribe to access the dashboard");
           router.push("/pricing");
           return;
         }
 
-        console.log("Access granted to dashboard");
         setIsLoading(false);
       } catch (error) {
-        console.error("Error in subscription check:", error);
+        console.error("Error checking subscription:", error);
         toast.error("Error checking subscription status");
         router.push("/pricing");
       }

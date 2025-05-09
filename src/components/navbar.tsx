@@ -4,10 +4,9 @@ import Link from "next/link";
 import { Button } from "./ui/button";
 import { User, UserCircle } from "lucide-react";
 import UserProfile from "./user-profile";
-import { User as SupabaseUser } from "@supabase/supabase-js";
 
 interface NavbarProps {
-  user: SupabaseUser | null;
+  user: any | null;
 }
 
 export default function Navbar({ user }: NavbarProps) {
