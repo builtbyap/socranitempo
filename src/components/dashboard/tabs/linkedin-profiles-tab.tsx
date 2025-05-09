@@ -44,14 +44,12 @@ export default function LinkedInProfilesTab() {
           throw new Error(error.message);
         }
 
-        // Filter out profiles with missing required fields
+        // Log the raw data to help with debugging
+        console.log("Raw profiles data:", data);
+
+        // Filter out profiles with missing required fields, but with more lenient checks
         const validProfiles = (data || []).filter(
-          (profile) =>
-            profile &&
-            profile.id &&
-            profile.name &&
-            profile.company &&
-            profile.title,
+          (profile) => profile && profile.id,
         );
 
         setProfiles(validProfiles);
@@ -149,26 +147,42 @@ export default function LinkedInProfilesTab() {
             (savedProfile) => savedProfile.id === profile.id,
           );
 
+          // Parse name to separate the part before and after the dash
+          const fullName = profile.name || "No Name";
+          let displayName = fullName;
+          let titleFromName = "";
+
+          if (fullName.includes(" - ")) {
+            const parts = fullName.split(" - ");
+            displayName = parts[0];
+            titleFromName = parts.slice(1).join(" - ");
+          }
+
+          // Use the title from name or fall back to the original title
+          const displayTitle = titleFromName || profile.title || "No Title";
+
           return (
             <Card key={profile.id}>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">{profile.name}</CardTitle>
+                  <CardTitle className="text-lg">{displayName}</CardTitle>
                   <Linkedin className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <CardDescription>{profile.title}</CardDescription>
+                <CardDescription>{displayTitle}</CardDescription>
               </CardHeader>
               <CardContent>
-                <p className="text-sm">Company: {profile.company}</p>
+                <p className="text-sm">
+                  Company: {profile.company || "No Company"}
+                </p>
               </CardContent>
               <CardFooter>
                 <div className="flex w-full gap-2">
                   <Button
                     size="sm"
                     className="flex-1"
-                    onClick={() => handleViewProfile(profile.linkedin)}
+                    onClick={() => handleViewProfile(profile.linkedin || "#")}
                   >
-                    View Profile
+                    {profile.linkedin ? "View Profile" : "No Profile Link"}
                   </Button>
                   <Button
                     size="sm"
