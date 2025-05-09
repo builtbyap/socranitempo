@@ -1,107 +1,106 @@
-import { signInAction } from "@/app/actions";
-import { FormMessage, Message } from "@/components/form-message";
-import { GoogleSignInButton } from "@/components/google-sign-in-button";
-import Navbar from "@/components/navbar";
-import { SubmitButton } from "@/components/submit-button";
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import Link from "next/link";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import Navbar from "@/components/navbar";
+import { UrlProvider } from "@/components/url-provider";
+import { GoogleSignInButton } from "@/components/google-sign-in-button";
 
-interface LoginProps {
-  searchParams: Promise<Message>;
-}
+export default function SignInPage() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
 
-export default async function SignInPage({ searchParams }: LoginProps) {
-  const message = await searchParams;
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
 
-  if ("message" in message) {
-    return (
-      <div className="flex h-screen w-full flex-1 items-center justify-center p-4 sm:max-w-md">
-        <FormMessage message={message} />
-      </div>
-    );
-  }
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success("Signed in successfully");
+      router.push("/dashboard");
+    } catch (error) {
+      console.error("Error signing in:", error);
+      toast.error("Failed to sign in");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <>
-      <Navbar />
+      <Navbar user={null} />
       <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-8">
         <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-sm">
-          <form className="flex flex-col space-y-6">
-            <div className="space-y-2 text-center">
-              <h1 className="text-3xl font-semibold tracking-tight">Sign in</h1>
-              <p className="text-sm text-muted-foreground">
-                Don't have an account?{" "}
-                <Link
-                  className="text-primary font-medium hover:underline transition-all"
-                  href="/sign-up"
-                >
-                  Sign up
-                </Link>
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm font-medium">
-                  Email
-                </Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  required
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <Label htmlFor="password" className="text-sm font-medium">
-                    Password
-                  </Label>
-                  <Link
-                    className="text-xs text-muted-foreground hover:text-foreground hover:underline transition-all"
-                    href="/forgot-password"
-                  >
-                    Forgot Password?
-                  </Link>
-                </div>
-                <Input
-                  id="password"
-                  type="password"
-                  name="password"
-                  placeholder="Your password"
-                  required
-                  className="w-full"
-                />
-              </div>
-            </div>
-
-            <SubmitButton
-              className="w-full"
-              pendingText="Signing in..."
-              formAction={signInAction}
-            >
-              Sign in
-            </SubmitButton>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">
-                  Or continue with
-                </span>
-              </div>
-            </div>
-
-            <GoogleSignInButton />
-
-            <FormMessage message={message} />
-          </form>
+          <UrlProvider>
+            <Card>
+              <CardHeader>
+                <CardTitle>Sign In</CardTitle>
+                <CardDescription>
+                  Enter your email and password to sign in to your account.
+                </CardDescription>
+              </CardHeader>
+              <form onSubmit={handleSubmit}>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="email">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="Enter your email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="password">Password</Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        placeholder="Enter your password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+                <CardFooter className="flex flex-col space-y-4">
+                  <Button type="submit" className="w-full" disabled={isLoading}>
+                    {isLoading ? "Signing in..." : "Sign In"}
+                  </Button>
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">
+                        Or continue with
+                      </span>
+                    </div>
+                  </div>
+                  <GoogleSignInButton />
+                </CardFooter>
+              </form>
+            </Card>
+          </UrlProvider>
         </div>
       </div>
     </>
