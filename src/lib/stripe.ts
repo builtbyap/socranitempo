@@ -118,3 +118,33 @@ export async function updateUserSubscription({
     return { success: false, error: error.message };
   }
 }
+
+// Function to verify payment status
+export async function verifyPaymentStatus({
+  paymentIntentId,
+  clientSecret,
+  userId,
+}: {
+  paymentIntentId: string;
+  clientSecret: string;
+  userId: string;
+}) {
+  try {
+    const { data, error } = await supabase.functions.invoke(
+      "supabase-functions-verify_payment_status",
+      {
+        body: {
+          payment_intent_id: paymentIntentId,
+          client_secret: clientSecret,
+          user_id: userId,
+        },
+      },
+    );
+
+    if (error) throw new Error(error.message);
+    return { data, error: null };
+  } catch (error: any) {
+    console.error("Error verifying payment status:", error);
+    return { data: null, error: error.message };
+  }
+}

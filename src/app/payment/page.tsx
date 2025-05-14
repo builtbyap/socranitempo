@@ -131,7 +131,23 @@ export default function PaymentPage() {
           </div>
         )}
 
-        {isSubscribed ? (
+        {paymentSuccess ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-8">
+            <div className="flex items-center gap-3 mb-2">
+              <CheckIcon className="text-green-600" />
+              <h2 className="text-xl font-semibold text-green-800">
+                Payment Successful!
+              </h2>
+            </div>
+            <p className="text-green-700 mb-4">
+              Your payment was successful. You will be redirected to the
+              dashboard shortly.
+            </p>
+            <Link href="/dashboard">
+              <Button>Go to Dashboard Now</Button>
+            </Link>
+          </div>
+        ) : isSubscribed ? (
           <div className="bg-green-50 border border-green-200 rounded-lg p-6 mb-8">
             <div className="flex items-center gap-3 mb-2">
               <CheckIcon className="text-green-600" />

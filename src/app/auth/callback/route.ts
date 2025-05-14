@@ -23,6 +23,11 @@ export async function GET(request: Request) {
         !userData?.subscription_status ||
         userData.subscription_status !== "active"
       ) {
+        // Always redirect new users to pricing after email verification
+        if (redirect_to?.includes("/pricing")) {
+          return NextResponse.redirect(new URL("/pricing", requestUrl.origin));
+        }
+
         // If no specific redirect is requested, send to pricing
         if (!redirect_to) {
           return NextResponse.redirect(new URL("/pricing", requestUrl.origin));

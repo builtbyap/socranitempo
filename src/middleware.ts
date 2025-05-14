@@ -45,6 +45,12 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    // Don't redirect if coming from a successful payment
+    const paymentParam = url.searchParams.get("payment");
+    if (paymentParam === "success") {
+      return res;
+    }
+
     // Check subscription status for authenticated users
     try {
       const { data: userData } = await supabase
@@ -53,7 +59,7 @@ export async function middleware(req: NextRequest) {
         .eq("user_id", session.user.id)
         .single();
 
-      // If user doesn't have an active subscription, redirect to pricing page
+      // If user doesn't have an active subscription, redirect to payment page
       if (!userData || userData.subscription_status !== "active") {
         url.pathname = "/payment";
         return NextResponse.redirect(url);
