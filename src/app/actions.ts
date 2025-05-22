@@ -10,7 +10,6 @@ export const signUpAction = async (formData: FormData) => {
   const password = formData.get("password")?.toString();
   const fullName = formData.get("full_name")?.toString() || "";
   const supabase = await createClient();
-  const origin = headers().get("origin");
 
   if (!email || !password) {
     return encodedRedirect(
@@ -27,15 +26,12 @@ export const signUpAction = async (formData: FormData) => {
     email,
     password,
     options: {
-      emailRedirectTo: `${origin}/auth/callback?redirect_to=/pricing`,
       data: {
         full_name: fullName,
         email: email,
       },
     },
   });
-
-  console.log("After signUp", error);
 
   if (error) {
     console.error(error.code + " " + error.message);
@@ -63,11 +59,7 @@ export const signUpAction = async (formData: FormData) => {
     }
   }
 
-  return encodedRedirect(
-    "success",
-    "/sign-up",
-    "Thanks for signing up! Please check your email for a verification link.",
-  );
+  return redirect("/payment");
 };
 
 export const signInAction = async (formData: FormData) => {
