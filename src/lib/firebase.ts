@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore, doc, updateDoc, getDoc, collection } from 'firebase/firestore';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getFirestore, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 const firebaseConfig = {
@@ -20,45 +20,89 @@ const functions = getFunctions(app);
 
 export { app, auth, db, functions };
 
-interface CheckoutSessionResponse {
-  sessionId: string;
-}
-
-interface CustomerPortalResponse {
-  url: string;
-}
-
-// Function to create a Stripe checkout session
-export const createCheckoutSession = async (priceId: string) => {
+// Authentication functions
+export const signIn = async (email: string, password: string) => {
   try {
-    const createCheckoutSession = httpsCallable<{ priceId: string }, CheckoutSessionResponse>(
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    // Check subscription status
+    const { subscription, error: subError } = await getSubscriptionStatus(user.uid);
+    
+    if (subError) {
+      console.error('Error checking subscription:', subError);
+      return { success: false, error: 'Failed to verify subscription status' };
+    }
+
+    // If no subscription exists, create a customer record
+    if (!subscription) {
+      const { success: createSuccess, error: createError } = await createCustomer(user.uid, email);
+      if (!createSuccess) {
+        console.error('Error creating customer:', createError);
+        return { success: false, error: 'Failed to create customer record' };
+      }
+    }
+
+    return { 
+      success: true, 
+      user,
+      subscription: subscription || null
+    };
+  } catch (error: any) {
+    console.error('Error signing in:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const signUp = async (email: string, password: string) => {
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    // Create customer record
+    const { success: createSuccess, error: createError } = await createCustomer(user.uid, email);
+    if (!createSuccess) {
+      console.error('Error creating customer:', createError);
+      return { success: false, error: 'Failed to create customer record' };
+    }
+
+    return { 
+      success: true, 
+      user,
+      subscription: null // New users don't have a subscription yet
+    };
+  } catch (error: any) {
+    console.error('Error signing up:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export const logOut = async () => {
+  try {
+    await signOut(auth);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error signing out:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Function to create a customer record
+export const createCustomer = async (userId: string, email: string) => {
+  try {
+    const createCustomer = httpsCallable<{ userId: string, email: string }, void>(
       functions,
-      'ext-firebase-stripe-createCheckoutSession'
+      'ext-firebase-stripe-createCustomer'
     );
-    const { data } = await createCheckoutSession({ priceId });
-    return { success: true, sessionId: data.sessionId };
+    await createCustomer({ userId, email });
+    return { success: true };
   } catch (error) {
-    console.error('Error creating checkout session:', error);
+    console.error('Error creating customer:', error);
     return { success: false, error };
   }
 };
 
-// Function to get customer portal URL
-export const getCustomerPortalUrl = async () => {
-  try {
-    const getCustomerPortalUrl = httpsCallable<{}, CustomerPortalResponse>(
-      functions,
-      'ext-firebase-stripe-getCustomerPortalUrl'
-    );
-    const { data } = await getCustomerPortalUrl();
-    return { success: true, url: data.url };
-  } catch (error) {
-    console.error('Error getting customer portal URL:', error);
-    return { success: false, error };
-  }
-};
-
-// Function to get subscription status
+// Subscription functions
 export const getSubscriptionStatus = async (userId: string) => {
   try {
     const userRef = doc(db, 'customers', userId);
@@ -79,6 +123,36 @@ export const getSubscriptionStatus = async (userId: string) => {
   } catch (error) {
     console.error('Error getting subscription status:', error);
     return { subscription: null, error };
+  }
+};
+
+// Function to create a Stripe checkout session
+export const createCheckoutSession = async (priceId: string) => {
+  try {
+    const createCheckoutSession = httpsCallable<{ priceId: string }, { sessionId: string }>(
+      functions,
+      'ext-firebase-stripe-createCheckoutSession'
+    );
+    const { data } = await createCheckoutSession({ priceId });
+    return { success: true, sessionId: data.sessionId };
+  } catch (error) {
+    console.error('Error creating checkout session:', error);
+    return { success: false, error };
+  }
+};
+
+// Function to get customer portal URL
+export const getCustomerPortalUrl = async () => {
+  try {
+    const getCustomerPortalUrl = httpsCallable<{}, { url: string }>(
+      functions,
+      'ext-firebase-stripe-getCustomerPortalUrl'
+    );
+    const { data } = await getCustomerPortalUrl();
+    return { success: true, url: data.url };
+  } catch (error) {
+    console.error('Error getting customer portal URL:', error);
+    return { success: false, error };
   }
 };
 
