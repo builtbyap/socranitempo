@@ -50,7 +50,28 @@ export const signIn = async (email: string, password: string) => {
     };
   } catch (error: any) {
     console.error('Error signing in:', error);
-    return { success: false, error: error.message };
+    let errorMessage = 'Failed to sign in';
+    
+    switch (error.code) {
+      case 'auth/operation-not-allowed':
+        errorMessage = 'Email/password sign in is not enabled. Please contact support.';
+        break;
+      case 'auth/user-not-found':
+      case 'auth/wrong-password':
+        errorMessage = 'Invalid email or password';
+        break;
+      case 'auth/invalid-email':
+        errorMessage = 'Invalid email address';
+        break;
+      case 'auth/user-disabled':
+        errorMessage = 'This account has been disabled';
+        break;
+      case 'auth/too-many-requests':
+        errorMessage = 'Too many failed attempts. Please try again later';
+        break;
+    }
+    
+    return { success: false, error: errorMessage };
   }
 };
 
@@ -73,7 +94,24 @@ export const signUp = async (email: string, password: string) => {
     };
   } catch (error: any) {
     console.error('Error signing up:', error);
-    return { success: false, error: error.message };
+    let errorMessage = 'Failed to sign up';
+    
+    switch (error.code) {
+      case 'auth/operation-not-allowed':
+        errorMessage = 'Email/password sign up is not enabled. Please contact support.';
+        break;
+      case 'auth/email-already-in-use':
+        errorMessage = 'An account with this email already exists';
+        break;
+      case 'auth/invalid-email':
+        errorMessage = 'Invalid email address';
+        break;
+      case 'auth/weak-password':
+        errorMessage = 'Password is too weak. Please use a stronger password';
+        break;
+    }
+    
+    return { success: false, error: errorMessage };
   }
 };
 
