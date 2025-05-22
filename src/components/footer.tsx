@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Twitter, Linkedin, Github } from 'lucide-react';
 
-export default function Footer() {
+const Footer = () => {
   const currentYear = new Date().getFullYear();
 
   return (
@@ -77,3 +77,5 @@ export default function Footer() {
     </footer>
   );
 }
+
+export default Footer;
