@@ -1,13 +1,14 @@
 "use client";
 
-export const metadata = {
-  title: "Privacy Policy",
-  description: "Privacy policy for Socrani",
-};
+import Head from "next/head";
 
 export default function PrivacyPolicyPage() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl">
+      <Head>
+        <title>Privacy Policy</title>
+        <meta name="description" content="Privacy policy for Socrani" />
+      </Head>
       <style jsx global>{`
         [data-custom-class='body'], [data-custom-class='body'] * {
           background: transparent !important;
