@@ -1,98 +1,69 @@
-import { FormMessage, Message } from "@/components/form-message";
-import { SubmitButton } from "@/components/submit-button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import Link from "next/link";
-import { signUpAction } from "@/app/actions";
-import Navbar from "@/components/navbar";
+"use client";
 
-export default async function Signup(props: {
-  searchParams: Promise<Message>;
-}) {
-  const searchParams = await props.searchParams;
-  if ("message" in searchParams) {
-    return (
-      <div className="flex h-screen w-full flex-1 items-center justify-center p-4 sm:max-w-md">
-        <FormMessage message={searchParams} />
-      </div>
-    );
-  }
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { signInWithGoogle } from '@/lib/firebase';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
+import Link from 'next/link';
+import Navbar from '@/components/navbar';
 
+function SignUpForm() {
+  const router = useRouter();
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleGoogleSignUp = async () => {
+    setError('');
+    setIsLoading(true);
+    try {
+      const { success, error, subscription } = await signInWithGoogle();
+      if (success) {
+        if (subscription?.status === 'active') {
+          router.push('/dashboard');
+        } else {
+          router.push('/payment');
+        }
+      } else {
+        setError(error || 'Failed to sign up with Google');
+      }
+    } catch (err) {
+      setError('An unexpected error occurred');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <Card className="w-[350px]">
+      <CardHeader>
+        <CardTitle>Sign Up</CardTitle>
+        <CardDescription>Create your account using Google</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button onClick={handleGoogleSignUp} disabled={isLoading} className="w-full">
+          {isLoading ? 'Signing up...' : 'Sign up with Google'}
+        </Button>
+        {error && <div className="text-red-500 text-sm mt-4">{error}</div>}
+      </CardContent>
+      <CardFooter className="flex flex-col space-y-4">
+        <div className="text-sm text-muted-foreground">
+          Already have an account?{' '}
+          <Link href="/sign-in" className="text-primary hover:underline">
+            Sign in
+          </Link>
+        </div>
+      </CardFooter>
+    </Card>
+  );
+}
+
+export default function SignUpPage() {
   return (
     <>
       <Navbar />
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 py-8">
-        <div className="w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-sm">
-          <form className="flex flex-col space-y-6">
-            <div className="space-y-2 text-center">
-              <h1 className="text-3xl font-semibold tracking-tight">Sign Up</h1>
-              <p className="text-sm text-muted-foreground">
-                Already have an account?{" "}
-                <Link
-                  className="text-primary font-medium hover:underline transition-all"
-                  href="/sign-in"
-                >
-                  Sign in
-                </Link>
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="full_name" className="text-sm font-medium">
-                  Full Name
-                </Label>
-                <Input
-                  id="full_name"
-                  name="full_name"
-                  type="text"
-                  placeholder="John Doe"
-                  required
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm font-medium">
-                  Email
-                </Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  required
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-sm font-medium">
-                  Password
-                </Label>
-                <Input
-                  id="password"
-                  type="password"
-                  name="password"
-                  placeholder="Your password"
-                  minLength={6}
-                  required
-                  className="w-full"
-                />
-              </div>
-            </div>
-
-            <SubmitButton
-              formAction={signUpAction}
-              pendingText="Signing up..."
-              className="w-full"
-            >
-              Sign up
-            </SubmitButton>
-
-            <FormMessage message={searchParams} />
-          </form>
-        </div>
+      <div className="container flex h-screen w-screen flex-col items-center justify-center">
+        <SignUpForm />
       </div>
     </>
   );

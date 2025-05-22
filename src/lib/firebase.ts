@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getFirestore, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
@@ -247,5 +247,38 @@ export const getFirebaseSubscription = async (userId: string) => {
   } catch (error) {
     console.error('Error getting Firebase subscription:', error);
     return { subscription: null, error };
+  }
+};
+
+export const signInWithGoogle = async () => {
+  try {
+    const provider = new GoogleAuthProvider();
+    const result = await signInWithPopup(auth, provider);
+    const user = result.user;
+
+    // Check subscription status
+    const { subscription, error: subError } = await getSubscriptionStatus(user.uid);
+    if (subError) {
+      console.error('Error checking subscription:', subError);
+      return { success: false, error: 'Failed to verify subscription status' };
+    }
+
+    // If no subscription exists, create a customer record
+    if (!subscription) {
+      const { success: createSuccess, error: createError } = await createCustomer(user.uid, user.email || '');
+      if (!createSuccess) {
+        console.error('Error creating customer:', createError);
+        return { success: false, error: 'Failed to create customer record' };
+      }
+    }
+
+    return {
+      success: true,
+      user,
+      subscription: subscription || null
+    };
+  } catch (error: any) {
+    console.error('Error signing in with Google:', error);
+    return { success: false, error: error.message || 'Failed to sign in with Google' };
   }
 }; 
