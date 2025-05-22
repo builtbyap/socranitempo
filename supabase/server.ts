@@ -1,51 +1,35 @@
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { getSubscriptionStatus } from "@/lib/firebase";
 
 export const createClient = async () => {
-  const cookieStore = cookies();
-
-  return createServerClient(
+  return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll().map(({ name, value }) => ({
-            name,
-            value,
-          }));
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
-          });
-        },
-      },
-    },
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 };
 
 export const checkSubscriptionStatus = async (userId: string) => {
-  const supabase = await createClient();
+  try {
+    // Get subscription status from Firebase Stripe extension
+    const { subscription, error } = await getSubscriptionStatus(userId);
 
-  const { data, error } = await supabase
-    .from("users")
-    .select("subscription_status, subscription_end_date")
-    .eq("user_id", userId)
-    .single();
+    if (error || !subscription) {
+      console.error("Error checking subscription:", error);
+      return { isSubscribed: false };
+    }
 
-  if (error || !data) {
+    // Check if subscription is active and not expired
+    const isActive = subscription.status === "active";
+    const isExpired = subscription.currentPeriodEnd
+      ? new Date(subscription.currentPeriodEnd) < new Date()
+      : true;
+
+    return {
+      isSubscribed: isActive && !isExpired,
+      subscriptionData: subscription,
+    };
+  } catch (error) {
+    console.error("Error checking subscription:", error);
     return { isSubscribed: false };
   }
-
-  // Check if subscription is active and not expired
-  const isActive = data.subscription_status === "active";
-  const isExpired = data.subscription_end_date
-    ? new Date(data.subscription_end_date) < new Date()
-    : true;
-
-  return {
-    isSubscribed: isActive && !isExpired,
-    subscriptionData: data,
-  };
 };
