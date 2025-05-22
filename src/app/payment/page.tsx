@@ -94,14 +94,22 @@ export default function PaymentPage() {
         return;
       }
 
-      const { success, sessionId, error } = await createCheckoutSession(priceId);
+      const response = await fetch("/api/create-checkout-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ priceId }),
+      });
 
-      if (!success || !sessionId) {
-        throw new Error(error?.toString() || "Failed to create checkout session");
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to create checkout session");
       }
 
       // Redirect to Stripe Checkout
-      window.location.href = `https://checkout.stripe.com/pay/${sessionId}`;
+      window.location.href = `https://checkout.stripe.com/pay/${data.sessionId}`;
     } catch (err: any) {
       console.error("Payment error:", err);
       setError(err.message || "An error occurred during payment processing");
