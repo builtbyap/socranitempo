@@ -1,3 +1,5 @@
+"use client";
+
 export const metadata = {
   title: "Privacy Policy",
   description: "Privacy policy for Socrani",
