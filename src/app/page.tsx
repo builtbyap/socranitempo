@@ -1,4 +1,3 @@
-import Footer from "@/components/footer";
 import Hero from "@/components/hero";
 import Navbar from "@/components/navbar";
 import { ArrowUpRight, CheckCircle2, Shield, Users, Zap } from 'lucide-react';
@@ -69,8 +68,6 @@ export default async function Home() {
           </a>
         </div>
       </section>
-
-      <Footer />
     </div>
   );
 }

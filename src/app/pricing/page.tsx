@@ -1,4 +1,3 @@
-import Footer from "@/components/footer";
 import Navbar from "@/components/navbar";
 import { Button } from "@/components/ui/button";
 import { Check } from "lucide-react";
@@ -102,8 +101,6 @@ export default function PricingPage() {
           </div>
         </div>
       </section>
-
-      <Footer />
     </div>
   );
 }
