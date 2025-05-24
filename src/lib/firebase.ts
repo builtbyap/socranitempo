@@ -168,43 +168,69 @@ export const createCustomer = async (userId: string, email: string) => {
 // Subscription functions
 export const getSubscriptionStatus = async (userId: string) => {
   try {
+    if (!userId) {
+      console.error('No userId provided to getSubscriptionStatus');
+      return { subscription: null, error: 'No user ID provided' };
+    }
+
+    console.log('Fetching subscription status for user:', userId);
     const userRef = doc(db, 'customers', userId);
     const docSnap = await getDoc(userRef);
     
     if (!docSnap.exists()) {
       console.log('No customer document found for user:', userId);
+      // Try to create a customer record if it doesn't exist
+      const { success, error: createError } = await createCustomer(userId, '');
+      if (!success) {
+        console.error('Failed to create customer record:', createError);
+        return { subscription: null, error: 'Failed to create customer record' };
+      }
       return { subscription: null };
     }
     
     const data = docSnap.data();
+    console.log('Customer data:', data);
     
     // Check if the subscription data exists and is valid
     if (!data.subscriptionStatus || !data.currentPeriodEnd) {
-      console.log('Invalid subscription data for user:', userId);
-      return { subscription: null };
+      console.log('Invalid subscription data for user:', userId, 'Data:', data);
+      return { subscription: null, error: 'Invalid subscription data' };
     }
 
     // Check if the subscription is expired
     const currentPeriodEnd = new Date(data.currentPeriodEnd);
-    const isExpired = currentPeriodEnd < new Date();
+    const now = new Date();
+    const isExpired = currentPeriodEnd < now;
+    
+    console.log('Subscription details:', {
+      status: data.subscriptionStatus,
+      currentPeriodEnd: currentPeriodEnd.toISOString(),
+      now: now.toISOString(),
+      isExpired
+    });
     
     // If subscription is expired, return null
     if (isExpired && data.subscriptionStatus === 'active') {
       console.log('Subscription expired for user:', userId);
-      return { subscription: null };
+      return { subscription: null, error: 'Subscription expired' };
     }
 
-    return { 
-      subscription: {
-        status: data.subscriptionStatus,
-        priceId: data.priceId,
-        currentPeriodEnd: data.currentPeriodEnd,
-        isExpired
-      }
+    const subscription = {
+      status: data.subscriptionStatus,
+      priceId: data.priceId,
+      currentPeriodEnd: data.currentPeriodEnd,
+      isExpired
     };
-  } catch (error) {
+
+    console.log('Returning subscription:', subscription);
+    return { subscription };
+  } catch (error: any) {
     console.error('Error getting subscription status:', error);
-    return { subscription: null, error };
+    return { 
+      subscription: null, 
+      error: error.message || 'Failed to get subscription status',
+      details: error
+    };
   }
 };
 

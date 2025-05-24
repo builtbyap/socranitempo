@@ -60,10 +60,12 @@ export default function PaymentPage() {
         // Get current user
         const currentUser = auth.currentUser;
         if (!currentUser) {
+          console.log('No current user found, redirecting to sign in');
           router.push("/sign-in");
           return;
         }
 
+        console.log('Fetching data for user:', currentUser.uid);
         setUser(currentUser);
 
         // Fetch subscription status
@@ -71,7 +73,18 @@ export default function PaymentPage() {
         
         if (subError) {
           console.error("Subscription status error:", subError);
-          setError("Failed to verify subscription status. Please try again.");
+          // Handle specific error cases
+          if (subError === 'No user ID provided') {
+            setError("User ID is missing. Please try signing in again.");
+          } else if (subError === 'Failed to create customer record') {
+            setError("Unable to create your account. Please try again or contact support.");
+          } else if (subError === 'Invalid subscription data') {
+            setError("Your subscription data is invalid. Please contact support.");
+          } else if (subError === 'Subscription expired') {
+            setError("Your subscription has expired. Please renew to continue.");
+          } else {
+            setError("Failed to verify subscription status. Please try again.");
+          }
           return;
         }
 
@@ -85,10 +98,11 @@ export default function PaymentPage() {
         if (subData.isExpired) {
           console.log("Subscription expired for user:", currentUser.uid);
           setSubscription(null);
+          setError("Your subscription has expired. Please renew to continue.");
           return;
         }
 
-        console.log("Subscription data:", subData);
+        console.log("Setting subscription data:", subData);
         setSubscription(subData);
       } catch (error) {
         console.error("Error fetching user data:", error);
