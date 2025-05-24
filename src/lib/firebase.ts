@@ -128,6 +128,16 @@ export const logOut = async () => {
 // Function to create a customer record
 export const createCustomer = async (userId: string, email: string) => {
   try {
+    // First, check if the customer already exists
+    const userRef = doc(db, 'customers', userId);
+    const docSnap = await getDoc(userRef);
+    
+    if (docSnap.exists()) {
+      console.log('Customer already exists');
+      return { success: true };
+    }
+
+    // Create the customer using the Firebase Stripe extension
     const createCustomer = httpsCallable<{ userId: string, email: string }, void>(
       functions,
       'ext-firebase-stripe-createCustomer'
@@ -136,6 +146,12 @@ export const createCustomer = async (userId: string, email: string) => {
     const result = await createCustomer({ userId, email });
     console.log('Customer creation result:', result);
     
+    // Verify the customer was created
+    const verifyDoc = await getDoc(userRef);
+    if (!verifyDoc.exists()) {
+      throw new Error('Customer record was not created in Firestore');
+    }
+    
     return { success: true };
   } catch (error: any) {
     console.error('Error creating customer:', error);
@@ -143,7 +159,8 @@ export const createCustomer = async (userId: string, email: string) => {
     return { 
       success: false, 
       error: error.message || 'Failed to create customer record',
-      details: error.details || error
+      details: error.details || error,
+      code: error.code || 'unknown'
     };
   }
 };

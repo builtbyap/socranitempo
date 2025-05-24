@@ -18,7 +18,7 @@ import { createCheckoutSession, getCustomerPortalUrl, getSubscriptionStatus, aut
 // Define subscription plans
 const SUBSCRIPTION_PLANS = {
   monthly: {
-    id: "price_1RMyDuCyTrsNmVMYSACvTMhw", // Replace with your actual Stripe price ID
+    id: "price_1RMyDuCyTrsNmVMYSACvTMhw",
     name: "Monthly",
     price: 15,
     description: "Perfect for short-term needs",
@@ -29,7 +29,7 @@ const SUBSCRIPTION_PLANS = {
     ],
   },
   annual: {
-    id: "price_1RNNsvCyTrsNmVMYkaaTV7I7", // Replace with your actual Stripe price ID
+    id: "price_1RNNsvCyTrsNmVMYkaaTV7I7",
     name: "Annual",
     price: 150,
     description: "Best value for long-term use",
@@ -94,22 +94,14 @@ export default function PaymentPage() {
         return;
       }
 
-      const response = await fetch("/api/create-checkout-session", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ priceId }),
-      });
+      const { success, sessionId, error } = await createCheckoutSession(priceId);
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to create checkout session");
+      if (!success || !sessionId) {
+        throw new Error(error?.toString() || "Failed to create checkout session");
       }
 
       // Redirect to Stripe Checkout
-      window.location.href = `https://checkout.stripe.com/pay/${data.sessionId}`;
+      window.location.href = `https://checkout.stripe.com/pay/${sessionId}`;
     } catch (err: any) {
       console.error("Payment error:", err);
       setError(err.message || "An error occurred during payment processing");
@@ -191,59 +183,60 @@ export default function PaymentPage() {
             </div>
           </div>
         ) : (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 mb-8">
-            <div className="flex items-center gap-3 mb-2">
-              <InfoIcon className="text-amber-600" />
-              <h2 className="text-xl font-semibold text-amber-800">
-                Subscription Required
-              </h2>
+          <>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 mb-8">
+              <div className="flex items-center gap-3 mb-2">
+                <InfoIcon className="text-amber-600" />
+                <h2 className="text-xl font-semibold text-amber-800">
+                  Subscription Required
+                </h2>
+              </div>
+              <p className="text-amber-700">
+                Please choose a subscription plan to continue.
+              </p>
             </div>
-            <p className="text-amber-700 mb-4">
-              You need an active subscription to access the dashboard and all
-              features.
-            </p>
-          </div>
-        )}
 
-        <div className="grid md:grid-cols-2 gap-6">
-          {Object.entries(SUBSCRIPTION_PLANS).map(([key, plan]) => (
-            <Card key={key}>
-              <CardHeader>
-                <CardTitle>{plan.name}</CardTitle>
-                <CardDescription>{plan.description}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold mb-2">${plan.price}</div>
-                <p className="text-muted-foreground">
-                  {key === "monthly" ? "Billed monthly" : "Billed annually"}
-                </p>
-                <ul className="mt-4 space-y-2">
-                  {plan.features.map((feature, index) => (
-                    <li key={index} className="flex items-center gap-2">
-                      <CheckIcon className="h-4 w-4 text-green-500" />
-                      <span>{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-              <CardFooter>
-                <Button
-                  className="w-full"
-                  onClick={() => handleSubscribe(plan.id)}
-                  disabled={processingPayment || isSubscribed}
-                >
-                  {processingPayment ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : isSubscribed ? (
-                    "Current Plan"
-                  ) : (
-                    "Subscribe"
-                  )}
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
+            <div className="grid md:grid-cols-2 gap-8">
+              {Object.entries(SUBSCRIPTION_PLANS).map(([key, plan]) => (
+                <Card key={key} className="flex flex-col">
+                  <CardHeader>
+                    <CardTitle>{plan.name}</CardTitle>
+                    <CardDescription>{plan.description}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex-grow">
+                    <div className="text-3xl font-bold mb-4">
+                      ${plan.price}
+                      <span className="text-base font-normal text-muted-foreground">
+                        /{key === 'monthly' ? 'month' : 'year'}
+                      </span>
+                    </div>
+                    <ul className="space-y-2">
+                      {plan.features.map((feature, index) => (
+                        <li key={index} className="flex items-center gap-2">
+                          <CheckIcon className="h-4 w-4 text-green-500" />
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                  <CardFooter>
+                    <Button
+                      className="w-full"
+                      onClick={() => handleSubscribe(plan.id)}
+                      disabled={processingPayment}
+                    >
+                      {processingPayment ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        `Subscribe to ${plan.name}`
+                      )}
+                    </Button>
+                  </CardFooter>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </main>
   );

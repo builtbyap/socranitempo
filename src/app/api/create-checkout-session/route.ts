@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createCheckoutSession } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,6 +10,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Price ID is required" },
         { status: 400 }
+      );
+    }
+
+    // Get the current user
+    const user = auth.currentUser;
+    if (!user) {
+      return NextResponse.json(
+        { error: "User must be authenticated" },
+        { status: 401 }
       );
     }
 
