@@ -141,30 +141,51 @@ export const logOut = async () => {
 // Function to create a customer record
 export const createCustomer = async (userId: string, email: string) => {
   try {
+    if (!userId) {
+      console.error('No userId provided to createCustomer');
+      return { success: false, error: 'No user ID provided' };
+    }
+
+    console.log('Creating customer record for user:', userId, 'email:', email);
+
     // First, check if the customer already exists
     const userRef = doc(db, 'customers', userId);
     const docSnap = await getDoc(userRef);
     
     if (docSnap.exists()) {
-      console.log('Customer already exists');
+      console.log('Customer already exists for user:', userId);
       return { success: true };
     }
 
     // Create the customer using the Firebase Stripe extension
-    const createCustomer = httpsCallable<{ userId: string, email: string }, void>(
+    const createCustomer = httpsCallable<{ userId: string, email: string }, { customerId: string }>(
       functions,
-      'ext-firebase-stripe-createCustomer'
+      'ext-firestore-stripe-payments-createCustomer'
     );
     
+    console.log('Calling createCustomer function...');
     const result = await createCustomer({ userId, email });
     console.log('Customer creation result:', result);
     
+    if (!result.data?.customerId) {
+      console.error('No customerId returned from createCustomer function');
+      return { 
+        success: false, 
+        error: 'Failed to create customer record: No customer ID returned'
+      };
+    }
+
     // Verify the customer was created
     const verifyDoc = await getDoc(userRef);
     if (!verifyDoc.exists()) {
-      throw new Error('Customer record was not created in Firestore');
+      console.error('Customer record was not created in Firestore');
+      return { 
+        success: false, 
+        error: 'Customer record was not created in Firestore'
+      };
     }
-    
+
+    console.log('Customer record created successfully for user:', userId);
     return { success: true };
   } catch (error: any) {
     console.error('Error creating customer:', error);
