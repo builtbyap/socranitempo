@@ -356,26 +356,84 @@ export const getFirebaseSubscription = async (userId: string) => {
 
 export const signInWithGoogle = async () => {
   try {
+    console.log('Starting Google sign-in process...');
     const provider = new GoogleAuthProvider();
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
+    console.log('Google sign-in successful for user:', user.uid);
 
-    // Create customer record first if it doesn't exist
-    const { success: createSuccess, error: createError } = await createCustomer(user.uid, user.email || '');
-    if (!createSuccess) {
-      console.error('Error creating customer:', createError);
-      return { success: false, error: 'Failed to create customer record' };
+    // Create customer record using the Stripe Firestore extension
+    console.log('Creating customer record...');
+    const createCustomer = httpsCallable<{ userId: string, email: string }, { customerId: string }>(
+      functions,
+      'ext-firestore-stripe-payments-createCustomer'
+    );
+    
+    try {
+      const { data: customerData } = await createCustomer({ 
+        userId: user.uid, 
+        email: user.email || '' 
+      });
+
+      if (!customerData?.customerId) {
+        console.error('No customerId returned from createCustomer function');
+        return { 
+          success: false, 
+          error: 'Failed to create customer record: No customer ID returned'
+        };
+      }
+
+      console.log('Customer record created successfully:', customerData.customerId);
+    } catch (error: any) {
+      console.error('Error creating customer:', error);
+      return { 
+        success: false, 
+        error: 'Failed to create customer record',
+        details: error
+      };
     }
 
     // Wait a moment for the customer record to be fully created
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Check subscription status
+    console.log('Checking subscription status...');
     const { subscription, error: subError } = await getSubscriptionStatus(user.uid);
+    
     if (subError) {
       console.error('Error checking subscription:', subError);
       // Don't fail the sign-in if subscription check fails
       console.log('Continuing sign-in despite subscription check error');
+    }
+
+    // If no subscription exists, create a checkout session
+    if (!subscription) {
+      console.log('No subscription found, creating checkout session...');
+      const createCheckoutSession = httpsCallable<{ priceId: string }, { sessionId: string }>(
+        functions,
+        'ext-firestore-stripe-payments-createCheckoutSession'
+      );
+
+      try {
+        const { data: sessionData } = await createCheckoutSession({ 
+          priceId: 'price_1RMyDuCyTrsNmVMYSACvTMhw' // Monthly plan price ID
+        });
+
+        if (sessionData?.sessionId) {
+          console.log('Checkout session created, redirecting to Stripe...');
+          // Redirect to Stripe Checkout
+          window.location.href = `https://checkout.stripe.com/pay/${sessionData.sessionId}`;
+          return {
+            success: true,
+            user,
+            subscription: null,
+            redirecting: true
+          };
+        }
+      } catch (error) {
+        console.error('Error creating checkout session:', error);
+        // Continue with sign-in even if checkout session creation fails
+      }
     }
 
     return {
@@ -385,6 +443,10 @@ export const signInWithGoogle = async () => {
     };
   } catch (error: any) {
     console.error('Error signing in with Google:', error);
-    return { success: false, error: error.message || 'Failed to sign in with Google' };
+    return { 
+      success: false, 
+      error: error.message || 'Failed to sign in with Google',
+      details: error
+    };
   }
 }; 
