@@ -26,21 +26,23 @@ export const signIn = async (email: string, password: string) => {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
+    // Create customer record first if it doesn't exist
+    const { success: createSuccess, error: createError } = await createCustomer(user.uid, email);
+    if (!createSuccess) {
+      console.error('Error creating customer:', createError);
+      return { success: false, error: 'Failed to create customer record' };
+    }
+
+    // Wait a moment for the customer record to be fully created
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
     // Check subscription status
     const { subscription, error: subError } = await getSubscriptionStatus(user.uid);
     
     if (subError) {
       console.error('Error checking subscription:', subError);
-      return { success: false, error: 'Failed to verify subscription status' };
-    }
-
-    // If no subscription exists, create a customer record
-    if (!subscription) {
-      const { success: createSuccess, error: createError } = await createCustomer(user.uid, email);
-      if (!createSuccess) {
-        console.error('Error creating customer:', createError);
-        return { success: false, error: 'Failed to create customer record' };
-      }
+      // Don't fail the sign-in if subscription check fails
+      console.log('Continuing sign-in despite subscription check error');
     }
 
     return { 
@@ -87,10 +89,21 @@ export const signUp = async (email: string, password: string) => {
       return { success: false, error: 'Failed to create customer record' };
     }
 
+    // Wait a moment for the customer record to be fully created
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Check subscription status
+    const { subscription, error: subError } = await getSubscriptionStatus(user.uid);
+    if (subError) {
+      console.error('Error checking subscription:', subError);
+      // Don't fail the sign-up if subscription check fails
+      console.log('Continuing sign-up despite subscription check error');
+    }
+
     return { 
       success: true, 
       user,
-      subscription: null // New users don't have a subscription yet
+      subscription: subscription || null
     };
   } catch (error: any) {
     console.error('Error signing up:', error);
@@ -326,20 +339,22 @@ export const signInWithGoogle = async () => {
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
 
+    // Create customer record first if it doesn't exist
+    const { success: createSuccess, error: createError } = await createCustomer(user.uid, user.email || '');
+    if (!createSuccess) {
+      console.error('Error creating customer:', createError);
+      return { success: false, error: 'Failed to create customer record' };
+    }
+
+    // Wait a moment for the customer record to be fully created
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
     // Check subscription status
     const { subscription, error: subError } = await getSubscriptionStatus(user.uid);
     if (subError) {
       console.error('Error checking subscription:', subError);
-      return { success: false, error: 'Failed to verify subscription status' };
-    }
-
-    // If no subscription exists, create a customer record
-    if (!subscription) {
-      const { success: createSuccess, error: createError } = await createCustomer(user.uid, user.email || '');
-      if (!createSuccess) {
-        console.error('Error creating customer:', createError);
-        return { success: false, error: 'Failed to create customer record' };
-      }
+      // Don't fail the sign-in if subscription check fails
+      console.log('Continuing sign-in despite subscription check error');
     }
 
     return {
