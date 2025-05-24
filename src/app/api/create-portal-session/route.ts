@@ -3,6 +3,11 @@ import { auth } from '@/lib/firebase';
 import { getStripe } from '@/lib/stripe';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
+// Define the response type for the getCustomerId function
+interface CustomerIdResponse {
+  customerId: string;
+}
+
 export async function POST(req: Request) {
   try {
     const user = auth.currentUser;
@@ -15,10 +20,10 @@ export async function POST(req: Request) {
 
     // Get the customer ID from Firebase
     const functions = getFunctions();
-    const getCustomerId = httpsCallable(functions, 'ext-firestore-stripe-payments-getCustomerId');
-    const { data: { customerId } } = await getCustomerId();
+    const getCustomerId = httpsCallable<unknown, CustomerIdResponse>(functions, 'ext-firestore-stripe-payments-getCustomerId');
+    const { data } = await getCustomerId();
 
-    if (!customerId) {
+    if (!data.customerId) {
       return NextResponse.json(
         { error: 'No customer ID found' },
         { status: 400 }
@@ -28,7 +33,7 @@ export async function POST(req: Request) {
     // Create a Stripe Customer Portal session
     const stripe = await getStripe();
     const session = await stripe.billingPortal.sessions.create({
-      customer: customerId as string,
+      customer: data.customerId,
       return_url: `${req.headers.get('origin')}/payment`,
     });
 
