@@ -172,15 +172,34 @@ export const getSubscriptionStatus = async (userId: string) => {
     const docSnap = await getDoc(userRef);
     
     if (!docSnap.exists()) {
+      console.log('No customer document found for user:', userId);
       return { subscription: null };
     }
     
     const data = docSnap.data();
+    
+    // Check if the subscription data exists and is valid
+    if (!data.subscriptionStatus || !data.currentPeriodEnd) {
+      console.log('Invalid subscription data for user:', userId);
+      return { subscription: null };
+    }
+
+    // Check if the subscription is expired
+    const currentPeriodEnd = new Date(data.currentPeriodEnd);
+    const isExpired = currentPeriodEnd < new Date();
+    
+    // If subscription is expired, return null
+    if (isExpired && data.subscriptionStatus === 'active') {
+      console.log('Subscription expired for user:', userId);
+      return { subscription: null };
+    }
+
     return { 
       subscription: {
         status: data.subscriptionStatus,
         priceId: data.priceId,
         currentPeriodEnd: data.currentPeriodEnd,
+        isExpired
       }
     };
   } catch (error) {

@@ -55,6 +55,7 @@ export default function PaymentPage() {
     async function fetchUserData() {
       try {
         setLoading(true);
+        setError(null);
 
         // Get current user
         const currentUser = auth.currentUser;
@@ -66,7 +67,28 @@ export default function PaymentPage() {
         setUser(currentUser);
 
         // Fetch subscription status
-        const { subscription: subData } = await getSubscriptionStatus(currentUser.uid);
+        const { subscription: subData, error: subError } = await getSubscriptionStatus(currentUser.uid);
+        
+        if (subError) {
+          console.error("Subscription status error:", subError);
+          setError("Failed to verify subscription status. Please try again.");
+          return;
+        }
+
+        if (!subData) {
+          console.log("No subscription data found for user:", currentUser.uid);
+          setSubscription(null);
+          return;
+        }
+
+        // Check if subscription is valid
+        if (subData.isExpired) {
+          console.log("Subscription expired for user:", currentUser.uid);
+          setSubscription(null);
+          return;
+        }
+
+        console.log("Subscription data:", subData);
         setSubscription(subData);
       } catch (error) {
         console.error("Error fetching user data:", error);
@@ -79,7 +101,7 @@ export default function PaymentPage() {
     fetchUserData();
   }, [router]);
 
-  const isSubscribed = subscription?.status === "active";
+  const isSubscribed = subscription?.status === "active" && !subscription?.isExpired;
   const subscriptionEndDate = subscription?.currentPeriodEnd
     ? new Date(subscription.currentPeriodEnd).toLocaleDateString()
     : null;
