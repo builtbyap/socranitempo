@@ -1,10 +1,20 @@
 import { createClient } from "@supabase/supabase-js";
+import { loadStripe } from '@stripe/stripe-js';
 
 // Create a Supabase client for the browser
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
+
+let stripePromise: Promise<any>;
+
+export const getStripe = () => {
+  if (!stripePromise) {
+    stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+  }
+  return stripePromise;
+};
 
 // Function to create a payment intent
 export async function createPaymentIntent({

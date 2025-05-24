@@ -112,22 +112,25 @@ export default function PaymentPage() {
 
   const handleManageSubscription = async () => {
     try {
-      setProcessingPayment(true);
-      setError(null);
+      setLoading(true);
+      const response = await fetch('/api/create-portal-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
 
-      const { success, url, error } = await getCustomerPortalUrl();
-
-      if (!success || !url) {
-        throw new Error(error?.toString() || "Failed to get customer portal URL");
+      const { url, error } = await response.json();
+      if (error) {
+        throw new Error(error);
       }
 
-      // Redirect to Stripe Customer Portal
       window.location.href = url;
-    } catch (err: any) {
-      console.error("Error:", err);
-      setError(err.message || "An error occurred while accessing the customer portal");
+    } catch (error) {
+      console.error('Error:', error);
+      setError('Failed to open subscription management portal');
     } finally {
-      setProcessingPayment(false);
+      setLoading(false);
     }
   };
 
