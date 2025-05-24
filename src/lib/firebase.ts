@@ -16,7 +16,7 @@ const firebaseConfig = {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
-const functions = getFunctions(app);
+const functions = getFunctions(app, 'us-central1');
 
 export { app, auth, db, functions };
 
@@ -132,11 +132,19 @@ export const createCustomer = async (userId: string, email: string) => {
       functions,
       'ext-firebase-stripe-createCustomer'
     );
-    await createCustomer({ userId, email });
+    
+    const result = await createCustomer({ userId, email });
+    console.log('Customer creation result:', result);
+    
     return { success: true };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating customer:', error);
-    return { success: false, error };
+    // Return more detailed error information
+    return { 
+      success: false, 
+      error: error.message || 'Failed to create customer record',
+      details: error.details || error
+    };
   }
 };
 
