@@ -7,7 +7,12 @@ const admin = require("firebase-admin");
 const cors = require("cors");
 const stripe_1 = require("stripe");
 admin.initializeApp();
-const corsHandler = cors({ origin: true });
+const corsHandler = cors({
+    origin: ['https://socrani.com', 'http://localhost:3000'],
+    methods: ['GET', 'POST', 'OPTIONS'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization']
+});
 // Initialize Stripe with Firebase config
 const stripeSecretKey = (_a = functions.config().stripe) === null || _a === void 0 ? void 0 : _a.secret_key;
 if (!stripeSecretKey) {
@@ -78,12 +83,14 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
             console.log('Request body:', req.body); // Log the request body for debugging
             const { priceId, successUrl, cancelUrl } = req.body;
             if (!priceId) {
+                console.error('No priceId provided in request body');
                 res.status(400).json({ error: 'Price ID is required' });
                 return;
             }
             // Validate the price ID with Stripe
             try {
-                await stripe.prices.retrieve(priceId);
+                const price = await stripe.prices.retrieve(priceId);
+                console.log('Validated price:', price);
             }
             catch (error) {
                 console.error('Invalid price ID:', error);
@@ -91,7 +98,7 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
                 return;
             }
             // Get the origin from the request headers
-            const origin = req.headers.origin || 'http://localhost:3000';
+            const origin = req.headers.origin || 'https://socrani.com';
             // Create the checkout session
             const session = await stripe.checkout.sessions.create({
                 payment_method_types: ['card'],
@@ -105,6 +112,7 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
                 success_url: successUrl || `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: cancelUrl || `${origin}/cancel`,
             });
+            console.log('Created checkout session:', session.id);
             res.status(200).json({ sessionId: session.id });
         }
         catch (error) {

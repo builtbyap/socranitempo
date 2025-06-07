@@ -5,7 +5,12 @@ import Stripe from 'stripe';
 
 admin.initializeApp();
 
-const corsHandler = cors({ origin: true });
+const corsHandler = cors({
+  origin: ['https://socrani.com', 'http://localhost:3000'],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization']
+});
 
 // Initialize Stripe with Firebase config
 const stripeSecretKey = functions.config().stripe?.secret_key;
@@ -99,13 +104,15 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
       const { priceId, successUrl, cancelUrl } = req.body;
 
       if (!priceId) {
+        console.error('No priceId provided in request body');
         res.status(400).json({ error: 'Price ID is required' });
         return;
       }
 
       // Validate the price ID with Stripe
       try {
-        await stripe.prices.retrieve(priceId);
+        const price = await stripe.prices.retrieve(priceId);
+        console.log('Validated price:', price);
       } catch (error) {
         console.error('Invalid price ID:', error);
         res.status(400).json({ error: 'Invalid price ID' });
@@ -113,7 +120,7 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
       }
 
       // Get the origin from the request headers
-      const origin = req.headers.origin || 'http://localhost:3000';
+      const origin = req.headers.origin || 'https://socrani.com';
       
       // Create the checkout session
       const session = await stripe.checkout.sessions.create({
@@ -129,6 +136,7 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
         cancel_url: cancelUrl || `${origin}/cancel`,
       });
 
+      console.log('Created checkout session:', session.id);
       res.status(200).json({ sessionId: session.id });
     } catch (error) {
       console.error('Error creating checkout session:', error);

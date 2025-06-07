@@ -279,14 +279,18 @@ export const createCheckoutSession = async (priceId: string) => {
     
     const createCheckoutSessionFunction = httpsCallable<{ 
       priceId: string;
+      successUrl?: string;
+      cancelUrl?: string;
     }, { sessionId: string }>(
       functions,
       'createCheckoutSession'
     );
 
-    // Call the function with the price ID
+    // Call the function with the price ID and URLs
     const result = await createCheckoutSessionFunction({ 
-      priceId
+      priceId,
+      successUrl: `${window.location.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${window.location.origin}/cancel`
     });
     
     if (!result.data?.sessionId) {
