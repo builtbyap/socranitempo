@@ -324,11 +324,17 @@ export const handleSuccessfulPayment = functions.https.onCall(async (data, conte
       tier: tier
     });
 
-    // Update the customer document with basic info
+    // Update the customer document with subscription info
     const customerRef = admin.firestore().collection('customers').doc(context.auth.uid);
     await customerRef.set({
       stripeCustomerId: customerId,
       stripeSubscriptionId: subscriptionId,
+      stripePriceId: priceId,
+      stripeProductId: productId,
+      subscriptionStatus: subscription.status,
+      subscriptionTier: tier,
+      subscriptionStartDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_start * 1000),
+      subscriptionEndDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
