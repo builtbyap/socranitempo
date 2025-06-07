@@ -256,6 +256,7 @@ export const handleSuccessfulPayment = functions.https.onCall(async (data, conte
   try {
     // Check if user is authenticated
     if (!context.auth) {
+      console.error("User not authenticated");
       throw new functions.https.HttpsError(
         "unauthenticated",
         "User must be authenticated to process payment"
@@ -264,26 +265,38 @@ export const handleSuccessfulPayment = functions.https.onCall(async (data, conte
 
     const { sessionId } = data;
     if (!sessionId) {
+      console.error("No session ID provided");
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Session ID is required"
       );
     }
 
+    console.log("Processing payment for session:", sessionId);
+
     // Retrieve the session from Stripe
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (!session) {
+      console.error("Session not found:", sessionId);
       throw new functions.https.HttpsError(
         "not-found",
         "Session not found"
       );
     }
 
+    console.log("Session retrieved:", {
+      id: session.id,
+      status: session.status,
+      customer: session.customer,
+      subscription: session.subscription
+    });
+
     // Get the customer ID and subscription ID from the session
     const customerId = session.customer as string;
     const subscriptionId = session.subscription as string;
 
     if (!customerId || !subscriptionId) {
+      console.error("Invalid session data:", { customerId, subscriptionId });
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Invalid session data"
@@ -292,6 +305,12 @@ export const handleSuccessfulPayment = functions.https.onCall(async (data, conte
 
     // Get the subscription details
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    console.log("Subscription retrieved:", {
+      id: subscription.id,
+      status: subscription.status,
+      currentPeriodEnd: subscription.current_period_end
+    });
+
     const priceId = subscription.items.data[0].price.id;
     const productId = subscription.items.data[0].price.product as string;
 
@@ -299,8 +318,27 @@ export const handleSuccessfulPayment = functions.https.onCall(async (data, conte
     const product = await stripe.products.retrieve(productId);
     const tier = product.metadata.tier || "basic";
 
-    // The Stripe Firestore extension will automatically update the customer document
-    // with the subscription details, so we don't need to do it manually
+    console.log("Product details:", {
+      id: product.id,
+      name: product.name,
+      tier: tier
+    });
+
+    // Update the customer document with subscription details
+    const customerRef = admin.firestore().collection('customers').doc(context.auth.uid);
+    await customerRef.update({
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subscriptionId,
+      stripePriceId: priceId,
+      stripeProductId: productId,
+      subscriptionStatus: subscription.status,
+      subscriptionTier: tier,
+      subscriptionStartDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_start * 1000),
+      subscriptionEndDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    console.log("Customer document updated successfully");
 
     return {
       success: true,

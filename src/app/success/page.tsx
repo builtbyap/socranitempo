@@ -16,6 +16,7 @@ function SuccessContent() {
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [success, setSuccess] = useState(false);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const processPayment = async () => {
@@ -25,10 +26,13 @@ function SuccessContent() {
           throw new Error("No session ID found");
         }
 
+        console.log("Processing payment with session ID:", sessionId);
+
         // Wait for auth state to be ready
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
           if (!user) {
             if (retryCount < 3) {
+              console.log(`Auth not ready, retry ${retryCount + 1}/3`);
               // Retry after a short delay
               setTimeout(() => {
                 setRetryCount(prev => prev + 1);
@@ -38,23 +42,64 @@ function SuccessContent() {
             throw new Error("Please sign in to complete your payment");
           }
 
+          console.log("User authenticated:", user.uid);
+
           try {
             // Listen for changes to the user's subscription status
             const userRef = doc(db, "customers", user.uid);
+            console.log("Setting up Firestore listener for user:", user.uid);
+
             const unsubscribeSnapshot = onSnapshot(userRef, (doc) => {
               const data = doc.data();
-              if (data?.subscriptionStatus === "active") {
-                setSuccess(true);
-                // Wait a moment to show the success state
-                setTimeout(() => {
-                  router.push("/dashboard?payment=success");
-                }, 2000);
+              console.log("Firestore update received:", data);
+
+              if (data) {
+                setSubscriptionStatus(data.subscriptionStatus || "unknown");
+                
+                // Check for active subscription
+                if (data.subscriptionStatus === "active") {
+                  console.log("Subscription is active, setting success state");
+                  setSuccess(true);
+                  // Wait a moment to show the success state
+                  setTimeout(() => {
+                    console.log("Redirecting to dashboard");
+                    router.push("/dashboard?payment=success");
+                  }, 2000);
+                } else if (data.subscriptionStatus === "trialing") {
+                  console.log("Subscription is in trial period");
+                  setSuccess(true);
+                  setTimeout(() => {
+                    router.push("/dashboard?payment=success");
+                  }, 2000);
+                } else if (data.subscriptionStatus === "incomplete") {
+                  console.log("Subscription is incomplete");
+                  setError("Your subscription is still being processed. Please wait a moment.");
+                } else if (data.subscriptionStatus === "past_due") {
+                  console.log("Subscription is past due");
+                  setError("There was an issue with your payment. Please check your payment method.");
+                } else {
+                  console.log("Unknown subscription status:", data.subscriptionStatus);
+                  setError("Unable to verify subscription status. Please contact support.");
+                }
+              } else {
+                console.log("No user data found in Firestore");
+                setError("Unable to find your subscription details. Please contact support.");
               }
+              setLoading(false);
             }, (error) => {
               console.error("Error listening to subscription status:", error);
               setError("Failed to verify subscription status");
               setLoading(false);
             });
+
+            // Set a timeout to handle cases where the subscription status doesn't update
+            setTimeout(() => {
+              if (!success && !error) {
+                console.log("Timeout reached without subscription status update");
+                setError("Payment processing is taking longer than expected. Please check your dashboard or contact support.");
+                setLoading(false);
+              }
+            }, 30000); // 30 second timeout
 
             // Cleanup subscription
             return () => unsubscribeSnapshot();
@@ -75,7 +120,7 @@ function SuccessContent() {
     };
 
     processPayment();
-  }, [router, searchParams, retryCount]);
+  }, [router, searchParams, retryCount, success]);
 
   if (loading) {
     return (
@@ -86,6 +131,11 @@ function SuccessContent() {
           {retryCount > 0 && (
             <p className="text-sm text-gray-500 mt-2">
               Verifying your session... (Attempt {retryCount}/3)
+            </p>
+          )}
+          {subscriptionStatus && (
+            <p className="text-sm text-gray-500 mt-2">
+              Current status: {subscriptionStatus}
             </p>
           )}
         </div>
