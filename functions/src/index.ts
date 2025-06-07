@@ -1,8 +1,14 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import * as cors from 'cors';
+import Stripe from 'stripe';
 
 admin.initializeApp();
+
+// Initialize Stripe
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2025-02-24.acacia',
+});
 
 const corsHandler = cors({
   origin: [
@@ -124,43 +130,45 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
       const customerRef = admin.firestore().collection('customers').doc(userId);
       const customerDoc = await customerRef.get();
 
-      if (!customerDoc.exists) {
-        // Create a new customer record
+      let stripeCustomerId = customerDoc.data()?.stripeCustomerId;
+
+      if (!stripeCustomerId) {
+        // Create a new customer in Stripe
+        const customer = await stripe.customers.create({
+          email: decodedToken.email,
+          metadata: {
+            firebaseUID: userId
+          }
+        });
+        stripeCustomerId = customer.id;
+
+        // Update the customer document with Stripe customer ID
         await customerRef.set({
           email: decodedToken.email,
+          stripeCustomerId: customer.id,
           created: admin.firestore.FieldValue.serverTimestamp(),
-          subscription: null
-        });
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
       }
 
-      // Create the checkout session
-      const session = await customerRef
-        .collection('checkout_sessions')
-        .add({
+      // Create the checkout session directly with Stripe
+      const session = await stripe.checkout.sessions.create({
+        customer: stripeCustomerId,
+        line_items: [{
           price: priceId,
-          success_url: 'https://socrani.com/success',
-          cancel_url: 'https://socrani.com/cancel',
-          mode: 'subscription',
-          allow_promotion_codes: true,
-          billing_address_collection: 'required',
-          customer_email: decodedToken.email,
-          metadata: {
-            userId: userId
-          },
-          created: admin.firestore.FieldValue.serverTimestamp()
-        });
+          quantity: 1,
+        }],
+        mode: 'subscription',
+        success_url: 'https://socrani.com/success',
+        cancel_url: 'https://socrani.com/cancel',
+        allow_promotion_codes: true,
+        billing_address_collection: 'required',
+        metadata: {
+          firebaseUID: userId
+        }
+      });
 
-      // Wait for the session to be created
-      const sessionDoc = await session.get();
-      const sessionData = sessionDoc.data();
-
-      if (!sessionData?.sessionId) {
-        console.error('No session ID in response:', sessionData);
-        res.status(500).json({ error: 'Failed to create checkout session' });
-        return;
-      }
-
-      res.json({ sessionId: sessionData.sessionId });
+      res.json({ sessionId: session.id });
     } catch (error: any) {
       console.error('Error creating checkout session:', error);
       res.status(500).json({ 
