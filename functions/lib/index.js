@@ -75,6 +75,7 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
                 res.status(405).json({ error: 'Method not allowed' });
                 return;
             }
+            console.log('Request body:', req.body); // Log the request body for debugging
             const { priceId, successUrl, cancelUrl } = req.body;
             if (!priceId) {
                 res.status(400).json({ error: 'Price ID is required' });

@@ -94,6 +94,8 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
         return;
       }
 
+      console.log('Request body:', req.body); // Log the request body for debugging
+
       const { priceId, successUrl, cancelUrl } = req.body;
 
       if (!priceId) {
