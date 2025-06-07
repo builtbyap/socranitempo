@@ -14,6 +14,7 @@ import {
 import { CheckIcon, InfoIcon, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { createCheckoutSession, getCustomerPortalUrl, getSubscriptionStatus, auth } from "@/lib/firebase";
+import { getStripe } from "@/lib/stripe";
 
 // Define subscription plans
 const SUBSCRIPTION_PLANS = {
@@ -144,8 +145,20 @@ export default function PaymentPage() {
         throw new Error(error?.toString() || "Failed to create checkout session");
       }
 
+      // Get Stripe instance
+      const stripe = await getStripe();
+      if (!stripe) {
+        throw new Error('Failed to initialize Stripe');
+      }
+
       // Redirect to Stripe Checkout
-      window.location.href = `https://checkout.stripe.com/pay/${sessionId}`;
+      const { error: stripeError } = await stripe.redirectToCheckout({
+        sessionId
+      });
+
+      if (stripeError) {
+        throw new Error(stripeError.message);
+      }
     } catch (err: any) {
       console.error("Payment error:", err);
       setError(err.message || "An error occurred during payment processing");
