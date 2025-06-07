@@ -5,22 +5,16 @@ import Stripe from 'stripe';
 
 admin.initializeApp();
 
-// Initialize Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-05-28.basil',
-});
+const corsHandler = cors({ origin: true });
 
-const corsHandler = cors({
-  origin: [
-    'http://localhost:3000',
-    'https://socrani.com',
-    'https://socranitempo.vercel.app',
-    'https://socrani-18328.web.app',
-    'https://socrani-18328.firebaseapp.com'
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+// Initialize Stripe with Firebase config
+const stripeSecretKey = functions.config().stripe?.secret_key;
+if (!stripeSecretKey) {
+  throw new Error('Stripe secret key is not configured. Please set it using: firebase functions:config:set stripe.secret_key="YOUR_STRIPE_SECRET_KEY"');
+}
+
+const stripe = new Stripe(stripeSecretKey, {
+  apiVersion: '2023-10-16',
 });
 
 // Function to create a customer record when a new user signs up
@@ -92,110 +86,44 @@ export const createCustomer = functions.https.onCall(async (data, context) => {
   }
 });
 
-export const createCheckoutSession = functions.https.onRequest((req, res) => {
-  // Set CORS headers manually
-  res.set('Access-Control-Allow-Origin', 'https://socrani.com');
-  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.set('Access-Control-Allow-Credentials', 'true');
-
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    res.status(204).send('');
-    return;
-  }
-
+export const createCheckoutSession = functions.https.onRequest(async (req, res) => {
   return corsHandler(req, res, async () => {
     try {
-      console.log('Starting checkout session creation...');
-      
-      // Get the user from the request
-      const authHeader = req.headers.authorization;
-      if (!authHeader) {
-        console.error('No authorization header found');
-        res.status(401).json({ error: 'No authorization header' });
+      if (req.method !== 'POST') {
+        res.status(405).json({ error: 'Method not allowed' });
         return;
       }
 
-      const token = authHeader.split('Bearer ')[1];
-      console.log('Verifying ID token...');
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      const userId = decodedToken.uid;
-      console.log('User authenticated:', userId);
+      const { priceId, successUrl, cancelUrl } = req.body;
 
-      // Get the price ID from the request body
-      const { data } = req.body;
-      if (!data || !data.priceId) {
-        console.error('No price ID in request body:', req.body);
+      if (!priceId) {
         res.status(400).json({ error: 'Price ID is required' });
         return;
       }
 
-      const { priceId } = data;
-      console.log('Creating checkout session for price:', priceId);
-
-      // Get or create the customer document
-      const customerRef = admin.firestore().collection('customers').doc(userId);
-      const customerDoc = await customerRef.get();
-
-      let stripeCustomerId = customerDoc.data()?.stripeCustomerId;
-      console.log('Existing Stripe customer ID:', stripeCustomerId);
-
-      if (!stripeCustomerId) {
-        console.log('Creating new Stripe customer...');
-        // Create a new customer in Stripe
-        const customer = await stripe.customers.create({
-          email: decodedToken.email,
-          metadata: {
-            firebaseUID: userId
-          }
-        });
-        stripeCustomerId = customer.id;
-        console.log('New Stripe customer created:', stripeCustomerId);
-
-        // Update the customer document with Stripe customer ID
-        await customerRef.set({
-          email: decodedToken.email,
-          stripeCustomerId: customer.id,
-          created: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-      }
-
-      console.log('Creating Stripe checkout session...');
-      // Create the checkout session directly with Stripe
+      // Get the origin from the request headers
+      const origin = req.headers.origin || 'http://localhost:3000';
+      
+      // Create the checkout session
       const session = await stripe.checkout.sessions.create({
-        customer: stripeCustomerId,
-        line_items: [{
-          price: priceId,
-          quantity: 1,
-        }],
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price: priceId,
+            quantity: 1,
+          },
+        ],
         mode: 'subscription',
-        success_url: 'https://socrani.com/success',
-        cancel_url: 'https://socrani.com/cancel',
-        allow_promotion_codes: true,
-        billing_address_collection: 'required',
-        metadata: {
-          firebaseUID: userId
-        }
+        success_url: successUrl || `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: cancelUrl || `${origin}/cancel`,
       });
 
-      console.log('Checkout session created successfully:', session.id);
-      res.json({ sessionId: session.id });
-    } catch (error: any) {
+      res.status(200).json({ sessionId: session.id });
+    } catch (error) {
       console.error('Error creating checkout session:', error);
-      console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        type: error.type,
-        stack: error.stack
-      });
       res.status(500).json({ 
-        error: 'Internal server error',
-        details: error.message,
-        code: error.code,
-        type: error.type,
-        stack: error.stack
+        error: 'Failed to create checkout session',
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   });
