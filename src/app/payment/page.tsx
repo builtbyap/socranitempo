@@ -142,7 +142,9 @@ export default function PaymentPage() {
       // Get Stripe instance first
       const stripe = await getStripe();
       if (!stripe) {
-        throw new Error('Failed to initialize Stripe. Please check your publishable key configuration.');
+        setError('Unable to initialize payment system. Please try again later or contact support.');
+        console.error('Stripe initialization failed. Check if NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is properly set in .env.local');
+        return;
       }
 
       const { success, sessionId, error } = await createCheckoutSession(priceId);

@@ -22,7 +22,18 @@ export const getStripe = async (): Promise<Stripe | null> => {
       return null;
     }
 
-    stripePromise = loadStripe(publishableKey);
+    // Validate the publishable key format
+    if (!publishableKey.startsWith('pk_test_') && !publishableKey.startsWith('pk_live_')) {
+      console.error('Invalid Stripe publishable key format. Key should start with pk_test_ or pk_live_');
+      return null;
+    }
+
+    try {
+      stripePromise = loadStripe(publishableKey);
+    } catch (error) {
+      console.error('Error loading Stripe:', error);
+      return null;
+    }
   }
 
   try {
