@@ -81,6 +81,15 @@ exports.createCheckoutSession = functions.https.onRequest(async (req, res) => {
                 res.status(400).json({ error: 'Price ID is required' });
                 return;
             }
+            // Validate the price ID with Stripe
+            try {
+                await stripe.prices.retrieve(priceId);
+            }
+            catch (error) {
+                console.error('Invalid price ID:', error);
+                res.status(400).json({ error: 'Invalid price ID' });
+                return;
+            }
             // Get the origin from the request headers
             const origin = req.headers.origin || 'http://localhost:3000';
             // Create the checkout session
