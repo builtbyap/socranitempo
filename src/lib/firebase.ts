@@ -279,18 +279,14 @@ export const createCheckoutSession = async (priceId: string) => {
     
     const createCheckoutSessionFunction = httpsCallable<{ 
       priceId: string;
-      headers?: { Authorization: string };
     }, { sessionId: string }>(
       functions,
       'createCheckoutSession'
     );
 
-    // Set the authorization header
+    // Call the function with the price ID
     const result = await createCheckoutSessionFunction({ 
-      priceId,
-      headers: {
-        Authorization: `Bearer ${idToken}`
-      }
+      priceId
     });
     
     if (!result.data?.sessionId) {

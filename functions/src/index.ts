@@ -112,11 +112,13 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
       const userId = decodedToken.uid;
 
       // Get the price ID from the request body
-      const { priceId } = req.body;
-      if (!priceId) {
+      const { data } = req.body;
+      if (!data || !data.priceId) {
         res.status(400).json({ error: 'Price ID is required' });
         return;
       }
+
+      const { priceId } = data;
 
       // Create the checkout session
       const session = await admin.firestore()
