@@ -7,7 +7,7 @@ admin.initializeApp();
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
+  apiVersion: '2025-05-28.basil',
 });
 
 const corsHandler = cors({
@@ -15,7 +15,8 @@ const corsHandler = cors({
     'http://localhost:3000',
     'https://socrani.com',
     'https://socranitempo.vercel.app',
-    'https://socrani-18328.web.app'
+    'https://socrani-18328.web.app',
+    'https://socrani-18328.firebaseapp.com'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -106,33 +107,42 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
 
   return corsHandler(req, res, async () => {
     try {
+      console.log('Starting checkout session creation...');
+      
       // Get the user from the request
       const authHeader = req.headers.authorization;
       if (!authHeader) {
+        console.error('No authorization header found');
         res.status(401).json({ error: 'No authorization header' });
         return;
       }
 
       const token = authHeader.split('Bearer ')[1];
+      console.log('Verifying ID token...');
       const decodedToken = await admin.auth().verifyIdToken(token);
       const userId = decodedToken.uid;
+      console.log('User authenticated:', userId);
 
       // Get the price ID from the request body
       const { data } = req.body;
       if (!data || !data.priceId) {
+        console.error('No price ID in request body:', req.body);
         res.status(400).json({ error: 'Price ID is required' });
         return;
       }
 
       const { priceId } = data;
+      console.log('Creating checkout session for price:', priceId);
 
       // Get or create the customer document
       const customerRef = admin.firestore().collection('customers').doc(userId);
       const customerDoc = await customerRef.get();
 
       let stripeCustomerId = customerDoc.data()?.stripeCustomerId;
+      console.log('Existing Stripe customer ID:', stripeCustomerId);
 
       if (!stripeCustomerId) {
+        console.log('Creating new Stripe customer...');
         // Create a new customer in Stripe
         const customer = await stripe.customers.create({
           email: decodedToken.email,
@@ -141,6 +151,7 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
           }
         });
         stripeCustomerId = customer.id;
+        console.log('New Stripe customer created:', stripeCustomerId);
 
         // Update the customer document with Stripe customer ID
         await customerRef.set({
@@ -151,6 +162,7 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
         }, { merge: true });
       }
 
+      console.log('Creating Stripe checkout session...');
       // Create the checkout session directly with Stripe
       const session = await stripe.checkout.sessions.create({
         customer: stripeCustomerId,
@@ -168,12 +180,21 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
         }
       });
 
+      console.log('Checkout session created successfully:', session.id);
       res.json({ sessionId: session.id });
     } catch (error: any) {
       console.error('Error creating checkout session:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        type: error.type,
+        stack: error.stack
+      });
       res.status(500).json({ 
         error: 'Internal server error',
         details: error.message,
+        code: error.code,
+        type: error.type,
         stack: error.stack
       });
     }

@@ -4,13 +4,19 @@ exports.getSubscriptionStatus = exports.createCheckoutSession = exports.createCu
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const cors = require("cors");
+const stripe_1 = require("stripe");
 admin.initializeApp();
+// Initialize Stripe
+const stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY, {
+    apiVersion: '2025-05-28.basil',
+});
 const corsHandler = cors({
     origin: [
         'http://localhost:3000',
         'https://socrani.com',
         'https://socranitempo.vercel.app',
-        'https://socrani-18328.web.app'
+        'https://socrani-18328.web.app',
+        'https://socrani-18328.firebaseapp.com'
     ],
     credentials: true,
     methods: ['GET', 'POST', 'OPTIONS'],
@@ -80,65 +86,87 @@ exports.createCheckoutSession = functions.https.onRequest((req, res) => {
         return;
     }
     return corsHandler(req, res, async () => {
+        var _a;
         try {
+            console.log('Starting checkout session creation...');
             // Get the user from the request
             const authHeader = req.headers.authorization;
             if (!authHeader) {
+                console.error('No authorization header found');
                 res.status(401).json({ error: 'No authorization header' });
                 return;
             }
             const token = authHeader.split('Bearer ')[1];
+            console.log('Verifying ID token...');
             const decodedToken = await admin.auth().verifyIdToken(token);
             const userId = decodedToken.uid;
+            console.log('User authenticated:', userId);
             // Get the price ID from the request body
             const { data } = req.body;
             if (!data || !data.priceId) {
+                console.error('No price ID in request body:', req.body);
                 res.status(400).json({ error: 'Price ID is required' });
                 return;
             }
             const { priceId } = data;
+            console.log('Creating checkout session for price:', priceId);
             // Get or create the customer document
             const customerRef = admin.firestore().collection('customers').doc(userId);
             const customerDoc = await customerRef.get();
-            if (!customerDoc.exists) {
-                // Create a new customer record
+            let stripeCustomerId = (_a = customerDoc.data()) === null || _a === void 0 ? void 0 : _a.stripeCustomerId;
+            console.log('Existing Stripe customer ID:', stripeCustomerId);
+            if (!stripeCustomerId) {
+                console.log('Creating new Stripe customer...');
+                // Create a new customer in Stripe
+                const customer = await stripe.customers.create({
+                    email: decodedToken.email,
+                    metadata: {
+                        firebaseUID: userId
+                    }
+                });
+                stripeCustomerId = customer.id;
+                console.log('New Stripe customer created:', stripeCustomerId);
+                // Update the customer document with Stripe customer ID
                 await customerRef.set({
                     email: decodedToken.email,
+                    stripeCustomerId: customer.id,
                     created: admin.firestore.FieldValue.serverTimestamp(),
-                    subscription: null
-                });
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
             }
-            // Create the checkout session
-            const session = await customerRef
-                .collection('checkout_sessions')
-                .add({
-                price: priceId,
+            console.log('Creating Stripe checkout session...');
+            // Create the checkout session directly with Stripe
+            const session = await stripe.checkout.sessions.create({
+                customer: stripeCustomerId,
+                line_items: [{
+                        price: priceId,
+                        quantity: 1,
+                    }],
+                mode: 'subscription',
                 success_url: 'https://socrani.com/success',
                 cancel_url: 'https://socrani.com/cancel',
-                mode: 'subscription',
                 allow_promotion_codes: true,
                 billing_address_collection: 'required',
-                customer_email: decodedToken.email,
                 metadata: {
-                    userId: userId
-                },
-                created: admin.firestore.FieldValue.serverTimestamp()
+                    firebaseUID: userId
+                }
             });
-            // Wait for the session to be created
-            const sessionDoc = await session.get();
-            const sessionData = sessionDoc.data();
-            if (!(sessionData === null || sessionData === void 0 ? void 0 : sessionData.sessionId)) {
-                console.error('No session ID in response:', sessionData);
-                res.status(500).json({ error: 'Failed to create checkout session' });
-                return;
-            }
-            res.json({ sessionId: sessionData.sessionId });
+            console.log('Checkout session created successfully:', session.id);
+            res.json({ sessionId: session.id });
         }
         catch (error) {
             console.error('Error creating checkout session:', error);
+            console.error('Error details:', {
+                message: error.message,
+                code: error.code,
+                type: error.type,
+                stack: error.stack
+            });
             res.status(500).json({
                 error: 'Internal server error',
                 details: error.message,
+                code: error.code,
+                type: error.type,
                 stack: error.stack
             });
         }

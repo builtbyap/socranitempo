@@ -18,7 +18,7 @@ import { createCheckoutSession, getCustomerPortalUrl, getSubscriptionStatus, aut
 // Define subscription plans
 const SUBSCRIPTION_PLANS = {
   monthly: {
-    id: "price_1RMyDuCyTrsNmVMYSACvTMhw",
+    id: "price_1RMyDuCyTrsNmVMYSACvTMhw", // $15 monthly
     name: "Monthly",
     price: 15,
     description: "Perfect for short-term needs",
@@ -29,9 +29,9 @@ const SUBSCRIPTION_PLANS = {
     ],
   },
   annual: {
-    id: "price_1RNNsvCyTrsNmVMYkaaTV7I7",
+    id: "price_1RNNsvCyTrsNmVMYkaaTV7I7", // $50 annual
     name: "Annual",
-    price: 150,
+    price: 50,
     description: "Best value for long-term use",
     features: [
       "Full access to all features",
@@ -50,8 +50,16 @@ export default function PaymentPage() {
   const [loading, setLoading] = useState(true);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
 
   useEffect(() => {
+    // Get the plan from URL parameters
+    const params = new URLSearchParams(window.location.search);
+    const plan = params.get('plan');
+    if (plan && (plan === 'monthly' || plan === 'annual')) {
+      setSelectedPlan(plan);
+    }
+
     async function fetchUserData() {
       try {
         setLoading(true);
@@ -237,7 +245,12 @@ export default function PaymentPage() {
 
             <div className="grid md:grid-cols-2 gap-8">
               {Object.entries(SUBSCRIPTION_PLANS).map(([key, plan]) => (
-                <Card key={key} className="flex flex-col">
+                <Card 
+                  key={key} 
+                  className={`flex flex-col ${
+                    selectedPlan === key ? 'ring-2 ring-blue-500' : ''
+                  }`}
+                >
                   <CardHeader>
                     <CardTitle>{plan.name}</CardTitle>
                     <CardDescription>{plan.description}</CardDescription>

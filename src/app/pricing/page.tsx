@@ -21,7 +21,7 @@ export default function PricingPage() {
 
           <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
             {/* Monthly Plan */}
-            <div className="bg-white p-8 rounded-xl shadow-md border border-gray-100 flex flex-col h-full">
+            <div className="bg-white rounded-lg shadow-lg p-8 relative">
               <div className="mb-6">
                 <h3 className="text-lg font-medium text-gray-500">Monthly</h3>
                 <div className="mt-2 flex items-baseline">
@@ -51,7 +51,7 @@ export default function PricingPage() {
             </div>
 
             {/* Annual Plan */}
-            <div className="bg-white p-8 rounded-xl shadow-md border border-blue-100 flex flex-col h-full relative overflow-hidden">
+            <div className="bg-white rounded-lg shadow-lg p-8 relative">
               <div className="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 text-xs font-medium rounded-bl-lg">
                 Best Value
               </div>
