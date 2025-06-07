@@ -3,8 +3,21 @@ import { app } from "./config";
 
 const functions = getFunctions(app);
 
-export const handleSuccessfulPayment = async ({ sessionId }: { sessionId: string }) => {
-  const processPayment = httpsCallable(functions, 'handleSuccessfulPayment');
+interface PaymentResult {
+  success: boolean;
+  subscription?: {
+    customerId: string;
+    subscriptionId: string;
+    priceId: string;
+    productId: string;
+    tier: string;
+    status: string;
+    currentPeriodEnd: number;
+  };
+}
+
+export const handleSuccessfulPayment = async ({ sessionId }: { sessionId: string }): Promise<PaymentResult> => {
+  const processPayment = httpsCallable<{ sessionId: string }, PaymentResult>(functions, 'handleSuccessfulPayment');
   try {
     const result = await processPayment({ sessionId });
     return result.data;
