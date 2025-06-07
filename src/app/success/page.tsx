@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { auth, db } from "@/lib/firebase";
 import { doc, onSnapshot, getDoc } from "firebase/firestore";
 import { handleSuccessfulPayment } from "@/lib/firebase/functions";
 
-export default function SuccessPage() {
+function SuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -175,4 +175,26 @@ export default function SuccessPage() {
   }
 
   return null;
+}
+
+export default function SuccessPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center">
+        <Card className="w-[350px]">
+          <CardHeader>
+            <CardTitle className="text-center">Loading</CardTitle>
+            <CardDescription className="text-center">
+              Please wait while we load your payment details...
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </CardContent>
+        </Card>
+      </div>
+    }>
+      <SuccessContent />
+    </Suspense>
+  );
 } 
