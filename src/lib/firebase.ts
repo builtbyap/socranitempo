@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { getFirestore, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 const firebaseConfig = {
@@ -370,52 +370,26 @@ export const signInWithGoogle = async () => {
       };
     }
 
-    // Create customer record using the Stripe Firestore extension
-    console.log('Creating customer record...');
-    const createCustomer = httpsCallable<{ userId: string, email: string }, { customerId: string }>(
-      functions,
-      'ext-firestore-stripe-payments-createCustomer'
-    );
-    
+    // Create customer document in Firestore
+    console.log('Creating customer document in Firestore...');
     try {
-      console.log('Calling createCustomer function with:', {
-        userId: user.uid,
-        email: user.email
-      });
-      
-      const { data: customerData } = await createCustomer({ 
-        userId: user.uid, 
-        email: user.email
-      });
+      await setDoc(doc(db, 'customers', user.uid), {
+        email: user.email,
+        created: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
 
-      console.log('Customer creation response:', customerData);
-
-      if (!customerData?.customerId) {
-        console.error('No customerId returned from createCustomer function');
-        return { 
-          success: false, 
-          error: 'Failed to create customer record: No customer ID returned'
-        };
-      }
-
-      console.log('Customer record created successfully:', customerData.customerId);
+      console.log('Customer document created successfully');
     } catch (error: any) {
-      console.error('Error creating customer:', error);
-      // Log more details about the error
-      console.error('Error details:', {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        stack: error.stack
-      });
+      console.error('Error creating customer document:', error);
       return { 
         success: false, 
-        error: 'Failed to create customer record',
+        error: 'Failed to create customer document',
         details: error
       };
     }
 
-    // Wait a moment for the customer record to be fully created
+    // Wait a moment for the document to be fully created
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Check subscription status
