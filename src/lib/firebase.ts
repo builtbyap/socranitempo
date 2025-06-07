@@ -148,40 +148,21 @@ export const createCustomer = async (userId: string, email: string) => {
 
     console.log('Creating customer record for user:', userId, 'email:', email);
 
-    // First, check if the customer already exists
-    const userRef = doc(db, 'customers', userId);
-    const docSnap = await getDoc(userRef);
-    
-    if (docSnap.exists()) {
-      console.log('Customer already exists for user:', userId);
-      return { success: true };
-    }
-
-    // Create the customer using the Firebase Stripe extension
-    const createCustomer = httpsCallable<{ userId: string, email: string }, { customerId: string }>(
+    // Call the Cloud Function to create the customer
+    const createCustomerFunction = httpsCallable<{ email: string }, { success: boolean }>(
       functions,
-      'ext-firestore-stripe-payments-createCustomer'
+      'createCustomer'
     );
     
     console.log('Calling createCustomer function...');
-    const result = await createCustomer({ userId, email });
+    const result = await createCustomerFunction({ email });
     console.log('Customer creation result:', result);
     
-    if (!result.data?.customerId) {
-      console.error('No customerId returned from createCustomer function');
+    if (!result.data?.success) {
+      console.error('Failed to create customer record');
       return { 
         success: false, 
-        error: 'Failed to create customer record: No customer ID returned'
-      };
-    }
-
-    // Verify the customer was created
-    const verifyDoc = await getDoc(userRef);
-    if (!verifyDoc.exists()) {
-      console.error('Customer record was not created in Firestore');
-      return { 
-        success: false, 
-        error: 'Customer record was not created in Firestore'
+        error: 'Failed to create customer record'
       };
     }
 
@@ -189,7 +170,6 @@ export const createCustomer = async (userId: string, email: string) => {
     return { success: true };
   } catch (error: any) {
     console.error('Error creating customer:', error);
-    // Return more detailed error information
     return { 
       success: false, 
       error: error.message || 'Failed to create customer record',
@@ -370,22 +350,15 @@ export const signInWithGoogle = async () => {
       };
     }
 
-    // Create customer document in Firestore
-    console.log('Creating customer document in Firestore...');
-    try {
-      await setDoc(doc(db, 'customers', user.uid), {
-        email: user.email,
-        created: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-
-      console.log('Customer document created successfully');
-    } catch (error: any) {
-      console.error('Error creating customer document:', error);
+    // Create customer record using Cloud Function
+    console.log('Creating customer record...');
+    const { success: createSuccess, error: createError } = await createCustomer(user.uid, user.email);
+    if (!createSuccess) {
+      console.error('Error creating customer record:', createError);
       return { 
         success: false, 
-        error: 'Failed to create customer document',
-        details: error
+        error: 'Failed to create customer record',
+        details: createError
       };
     }
 
