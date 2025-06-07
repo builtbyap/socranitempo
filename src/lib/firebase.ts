@@ -274,12 +274,24 @@ export const createCheckoutSession = async (priceId: string) => {
 
     console.log('Creating checkout session for price:', priceId);
     
-    const createCheckoutSessionFunction = httpsCallable<{ priceId: string }, { sessionId: string }>(
+    // Get the current user's ID token
+    const idToken = await auth.currentUser.getIdToken();
+    
+    const createCheckoutSessionFunction = httpsCallable<{ 
+      priceId: string;
+      headers?: { Authorization: string };
+    }, { sessionId: string }>(
       functions,
       'createCheckoutSession'
     );
 
-    const result = await createCheckoutSessionFunction({ priceId });
+    // Set the authorization header
+    const result = await createCheckoutSessionFunction({ 
+      priceId,
+      headers: {
+        Authorization: `Bearer ${idToken}`
+      }
+    });
     
     if (!result.data?.sessionId) {
       console.error('No session ID returned from createCheckoutSession');
