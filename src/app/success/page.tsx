@@ -7,12 +7,14 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { handleSuccessfulPayment } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
 
 function SuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     const processPayment = async () => {
@@ -22,33 +24,51 @@ function SuccessContent() {
           throw new Error("No session ID found");
         }
 
-        const user = auth.currentUser;
-        if (!user) {
-          throw new Error("User not authenticated");
-        }
+        // Wait for auth state to be ready
+        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+          if (!user) {
+            if (retryCount < 3) {
+              // Retry after a short delay
+              setTimeout(() => {
+                setRetryCount(prev => prev + 1);
+              }, 1000);
+              return;
+            }
+            throw new Error("Please sign in to complete your payment");
+          }
 
-        // Handle the successful payment
-        const { success, error } = await handleSuccessfulPayment(user.uid, sessionId);
-        
-        if (!success) {
-          throw new Error(error?.toString() || "Failed to process payment");
-        }
+          try {
+            // Handle the successful payment
+            const { success, error } = await handleSuccessfulPayment(user.uid, sessionId);
+            
+            if (!success) {
+              throw new Error(error?.toString() || "Failed to process payment");
+            }
 
-        // Wait a moment to show the success state
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Redirect to dashboard
-        router.push("/dashboard?payment=success");
+            // Wait a moment to show the success state
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Redirect to dashboard
+            router.push("/dashboard?payment=success");
+          } catch (err: any) {
+            console.error("Error processing payment:", err);
+            setError(err.message || "An error occurred while processing your payment");
+          } finally {
+            setLoading(false);
+          }
+        });
+
+        // Cleanup subscription
+        return () => unsubscribe();
       } catch (err: any) {
-        console.error("Error processing payment:", err);
+        console.error("Error in payment process:", err);
         setError(err.message || "An error occurred while processing your payment");
-      } finally {
         setLoading(false);
       }
     };
 
     processPayment();
-  }, [router, searchParams]);
+  }, [router, searchParams, retryCount]);
 
   if (loading) {
     return (
@@ -56,6 +76,11 @@ function SuccessContent() {
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
           <p className="text-lg">Processing your payment...</p>
+          {retryCount > 0 && (
+            <p className="text-sm text-gray-500 mt-2">
+              Verifying your session... (Attempt {retryCount}/3)
+            </p>
+          )}
         </div>
       </div>
     );
@@ -72,10 +97,19 @@ function SuccessContent() {
           <CardContent>
             <p className="text-sm text-gray-600">{error}</p>
           </CardContent>
-          <CardFooter>
+          <CardFooter className="flex flex-col gap-2">
             <Button onClick={() => router.push("/payment")} className="w-full">
               Return to Payment
             </Button>
+            {error.includes("sign in") && (
+              <Button 
+                onClick={() => router.push("/sign-in")} 
+                variant="outline" 
+                className="w-full"
+              >
+                Sign In
+              </Button>
+            )}
           </CardFooter>
         </Card>
       </div>
