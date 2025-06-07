@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { loadStripe } from '@stripe/stripe-js';
+import { loadStripe, Stripe } from '@stripe/stripe-js';
 
 // Create a Supabase client for the browser
 const supabase = createClient(
@@ -10,7 +10,7 @@ const supabase = createClient(
 // Initialize Stripe with your publishable key
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '');
 
-export const getStripe = () => {
+export const getStripe = async (): Promise<Stripe | null> => {
   if (!stripePromise) {
     throw new Error('Stripe failed to initialize. Please check your publishable key.');
   }
