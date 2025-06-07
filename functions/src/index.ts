@@ -99,13 +99,30 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
         return;
       }
 
-      console.log('Request body:', req.body); // Log the request body for debugging
+      // Log the entire request for debugging
+      console.log('Request headers:', req.headers);
+      console.log('Request body:', req.body);
+      console.log('Request query:', req.query);
 
-      const { priceId, successUrl, cancelUrl } = req.body;
+      // Extract data from the request
+      const { data } = req.body;
+      if (!data) {
+        console.error('No data provided in request body');
+        res.status(400).json({ 
+          error: 'Request data is required',
+          data: null 
+        });
+        return;
+      }
+
+      const { priceId, successUrl, cancelUrl } = data;
 
       if (!priceId) {
-        console.error('No priceId provided in request body');
-        res.status(400).json({ error: 'Price ID is required' });
+        console.error('No priceId provided in request data');
+        res.status(400).json({ 
+          error: 'Price ID is required',
+          data: null 
+        });
         return;
       }
 
@@ -115,7 +132,11 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
         console.log('Validated price:', price);
       } catch (error) {
         console.error('Invalid price ID:', error);
-        res.status(400).json({ error: 'Invalid price ID' });
+        res.status(400).json({ 
+          error: 'Invalid price ID',
+          details: error instanceof Error ? error.message : 'Unknown error',
+          data: null 
+        });
         return;
       }
 
@@ -134,15 +155,25 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
         mode: 'subscription',
         success_url: successUrl || `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: cancelUrl || `${origin}/cancel`,
+        billing_address_collection: 'required',
+        customer_email: data.customerEmail,
       });
 
       console.log('Created checkout session:', session.id);
-      res.status(200).json({ sessionId: session.id });
+      
+      // Format response for httpsCallable
+      res.status(200).json({ 
+        data: { 
+          sessionId: session.id 
+        } 
+      });
     } catch (error) {
       console.error('Error creating checkout session:', error);
       res.status(500).json({ 
         error: 'Failed to create checkout session',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: error instanceof Error ? error.message : 'Unknown error',
+        code: error instanceof Error ? error.name : 'Unknown',
+        data: null 
       });
     }
   });

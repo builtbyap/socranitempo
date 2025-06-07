@@ -281,6 +281,7 @@ export const createCheckoutSession = async (priceId: string) => {
       priceId: string;
       successUrl?: string;
       cancelUrl?: string;
+      customerEmail?: string;
     }, { sessionId: string }>(
       functions,
       'createCheckoutSession'
@@ -290,12 +291,19 @@ export const createCheckoutSession = async (priceId: string) => {
     const result = await createCheckoutSessionFunction({ 
       priceId,
       successUrl: `${window.location.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${window.location.origin}/cancel`
+      cancelUrl: `${window.location.origin}/cancel`,
+      customerEmail: auth.currentUser.email || undefined
     });
     
+    console.log('Function result:', result);
+
     if (!result.data?.sessionId) {
       console.error('No session ID returned from createCheckoutSession');
-      return { success: false, error: 'Failed to create checkout session' };
+      return { 
+        success: false, 
+        error: 'Failed to create checkout session',
+        details: 'No session ID in response'
+      };
     }
 
     console.log('Checkout session created successfully:', result.data.sessionId);
