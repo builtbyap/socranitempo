@@ -120,10 +120,21 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
 
       const { priceId } = data;
 
+      // Get or create the customer document
+      const customerRef = admin.firestore().collection('customers').doc(userId);
+      const customerDoc = await customerRef.get();
+
+      if (!customerDoc.exists) {
+        // Create a new customer record
+        await customerRef.set({
+          email: decodedToken.email,
+          created: admin.firestore.FieldValue.serverTimestamp(),
+          subscription: null
+        });
+      }
+
       // Create the checkout session
-      const session = await admin.firestore()
-        .collection('customers')
-        .doc(userId)
+      const session = await customerRef
         .collection('checkout_sessions')
         .add({
           price: priceId,
@@ -135,7 +146,8 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
           customer_email: decodedToken.email,
           metadata: {
             userId: userId
-          }
+          },
+          created: admin.firestore.FieldValue.serverTimestamp()
         });
 
       // Wait for the session to be created
@@ -143,6 +155,7 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
       const sessionData = sessionDoc.data();
 
       if (!sessionData?.sessionId) {
+        console.error('No session ID in response:', sessionData);
         res.status(500).json({ error: 'Failed to create checkout session' });
         return;
       }
@@ -152,7 +165,8 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
       console.error('Error creating checkout session:', error);
       res.status(500).json({ 
         error: 'Internal server error',
-        details: error.message
+        details: error.message,
+        stack: error.stack
       });
     }
   });
@@ -191,12 +205,36 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
         .get();
 
       if (!customerDoc.exists) {
-        res.status(404).json({ error: 'Customer not found' });
+        // Create a new customer record if it doesn't exist
+        await admin.firestore()
+          .collection('customers')
+          .doc(userId)
+          .set({
+            email: decodedToken.email,
+            created: admin.firestore.FieldValue.serverTimestamp(),
+            subscription: null
+          });
+        
+        res.json({ subscription: null });
         return;
       }
 
       const customerData = customerDoc.data();
-      res.json({ subscription: customerData?.subscription || null });
+      
+      // If there's no subscription data, return null
+      if (!customerData?.subscription) {
+        res.json({ subscription: null });
+        return;
+      }
+
+      // Validate subscription data
+      const subscription = customerData.subscription;
+      if (!subscription.status || !subscription.type) {
+        res.json({ subscription: null });
+        return;
+      }
+
+      res.json({ subscription });
     } catch (error: any) {
       console.error('Error getting subscription status:', error);
       res.status(500).json({ 
