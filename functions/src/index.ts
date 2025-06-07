@@ -250,4 +250,96 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
       });
     }
   });
+});
+
+export const handleSuccessfulPayment = functions.https.onCall(async (request) => {
+  try {
+    const { sessionId } = request.data;
+    const userId = request.auth?.uid;
+
+    if (!userId) {
+      throw new Error("User not authenticated");
+    }
+
+    if (!sessionId) {
+      throw new Error("No session ID provided");
+    }
+
+    // Get the session from Stripe
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    
+    if (!session) {
+      throw new Error("No session found");
+    }
+
+    // Get the customer ID from the session
+    const customerId = session.customer as string;
+    
+    if (!customerId) {
+      throw new Error("No customer ID found in session");
+    }
+
+    // Get the subscription ID from the session
+    const subscriptionId = session.subscription as string;
+    
+    if (!subscriptionId) {
+      throw new Error("No subscription ID found in session");
+    }
+
+    // Get the subscription details from Stripe
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    
+    if (!subscription) {
+      throw new Error("No subscription found");
+    }
+
+    // Get the price ID from the subscription
+    const priceId = subscription.items.data[0]?.price.id;
+    
+    if (!priceId) {
+      throw new Error("No price ID found in subscription");
+    }
+
+    // Get the product ID from the price
+    const price = await stripe.prices.retrieve(priceId);
+    const productId = price.product as string;
+    
+    if (!productId) {
+      throw new Error("No product ID found in price");
+    }
+
+    // Get the product details
+    const product = await stripe.products.retrieve(productId);
+    
+    if (!product) {
+      throw new Error("No product found");
+    }
+
+    // Update the user's document with subscription details
+    const userRef = admin.firestore().collection('customers').doc(userId);
+    await userRef.update({
+      stripeCustomerId: customerId,
+      stripeSubscriptionId: subscriptionId,
+      stripePriceId: priceId,
+      stripeProductId: productId,
+      subscriptionStatus: subscription.status,
+      subscriptionTier: product.metadata.tier || "basic",
+      subscriptionStartDate: new Date(subscription.current_period_start * 1000),
+      subscriptionEndDate: new Date(subscription.current_period_end * 1000),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    return {
+      success: true,
+      subscription: {
+        status: subscription.status,
+        tier: product.metadata.tier || "basic",
+        startDate: new Date(subscription.current_period_start * 1000),
+        endDate: new Date(subscription.current_period_end * 1000)
+      }
+    };
+  } catch (error: any) {
+    console.error("Error in handleSuccessfulPayment:", error);
+    throw new Error(error.message || "Failed to process payment");
+  }
 }); 

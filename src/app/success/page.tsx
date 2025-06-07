@@ -15,6 +15,7 @@ function SuccessContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
     const processPayment = async () => {
@@ -45,6 +46,8 @@ function SuccessContent() {
               throw new Error(error?.toString() || "Failed to process payment");
             }
 
+            setSuccess(true);
+            
             // Wait a moment to show the success state
             await new Promise(resolve => setTimeout(resolve, 2000));
             
@@ -116,31 +119,35 @@ function SuccessContent() {
     );
   }
 
-  return (
-    <div className="container mx-auto px-4 py-8">
-      <Card className="max-w-md mx-auto">
-        <CardHeader>
-          <div className="flex justify-center mb-4">
-            <CheckCircle2 className="h-12 w-12 text-green-500" />
-          </div>
-          <CardTitle className="text-center">Payment Successful!</CardTitle>
-          <CardDescription className="text-center">
-            Thank you for your subscription
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-center text-sm text-gray-600">
-            Your subscription has been activated. You will be redirected to the dashboard shortly.
-          </p>
-        </CardContent>
-        <CardFooter>
-          <Button onClick={() => router.push("/dashboard")} className="w-full">
-            Go to Dashboard
-          </Button>
-        </CardFooter>
-      </Card>
-    </div>
-  );
+  if (success) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <Card className="max-w-md mx-auto">
+          <CardHeader>
+            <div className="flex justify-center mb-4">
+              <CheckCircle2 className="h-12 w-12 text-green-500" />
+            </div>
+            <CardTitle className="text-center">Payment Successful!</CardTitle>
+            <CardDescription className="text-center">
+              Thank you for your subscription
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-center text-sm text-gray-600">
+              Your subscription has been activated. You will be redirected to the dashboard shortly.
+            </p>
+          </CardContent>
+          <CardFooter>
+            <Button onClick={() => router.push("/dashboard")} className="w-full">
+              Go to Dashboard
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 export default function SuccessPage() {
