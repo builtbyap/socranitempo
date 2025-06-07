@@ -8,13 +8,33 @@ const supabase = createClient(
 );
 
 // Initialize Stripe with your publishable key
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '');
+let stripePromise: Promise<Stripe | null> | null = null;
 
 export const getStripe = async (): Promise<Stripe | null> => {
   if (!stripePromise) {
-    throw new Error('Stripe failed to initialize. Please check your publishable key.');
+    const publishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+    
+    // Debug log to check the publishable key
+    console.log('Stripe publishable key:', publishableKey ? 'Key is present' : 'Key is missing');
+    
+    if (!publishableKey) {
+      console.error('Stripe publishable key is not configured. Please add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY to your .env.local file');
+      return null;
+    }
+
+    stripePromise = loadStripe(publishableKey);
   }
-  return stripePromise;
+
+  try {
+    const stripe = await stripePromise;
+    if (!stripe) {
+      throw new Error('Failed to initialize Stripe');
+    }
+    return stripe;
+  } catch (error) {
+    console.error('Error initializing Stripe:', error);
+    return null;
+  }
 };
 
 // Function to create a payment intent

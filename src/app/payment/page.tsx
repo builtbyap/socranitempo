@@ -139,16 +139,16 @@ export default function PaymentPage() {
         return;
       }
 
+      // Get Stripe instance first
+      const stripe = await getStripe();
+      if (!stripe) {
+        throw new Error('Failed to initialize Stripe. Please check your publishable key configuration.');
+      }
+
       const { success, sessionId, error } = await createCheckoutSession(priceId);
 
       if (!success || !sessionId) {
         throw new Error(error?.toString() || "Failed to create checkout session");
-      }
-
-      // Get Stripe instance
-      const stripe = await getStripe();
-      if (!stripe) {
-        throw new Error('Failed to initialize Stripe');
       }
 
       // Redirect to Stripe Checkout
