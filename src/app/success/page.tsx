@@ -5,9 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle2, Loader2 } from "lucide-react";
-import { handleSuccessfulPayment } from "@/lib/firebase";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
+import { doc, onSnapshot } from "firebase/firestore";
 
 function SuccessContent() {
   const router = useRouter();
@@ -39,29 +39,33 @@ function SuccessContent() {
           }
 
           try {
-            // Handle the successful payment
-            const { success, error } = await handleSuccessfulPayment(user.uid, sessionId);
-            
-            if (!success) {
-              throw new Error(error?.toString() || "Failed to process payment");
-            }
+            // Listen for changes to the user's subscription status
+            const userRef = doc(db, "customers", user.uid);
+            const unsubscribeSnapshot = onSnapshot(userRef, (doc) => {
+              const data = doc.data();
+              if (data?.subscriptionStatus === "active") {
+                setSuccess(true);
+                // Wait a moment to show the success state
+                setTimeout(() => {
+                  router.push("/dashboard?payment=success");
+                }, 2000);
+              }
+            }, (error) => {
+              console.error("Error listening to subscription status:", error);
+              setError("Failed to verify subscription status");
+              setLoading(false);
+            });
 
-            setSuccess(true);
-            
-            // Wait a moment to show the success state
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            // Redirect to dashboard
-            router.push("/dashboard?payment=success");
+            // Cleanup subscription
+            return () => unsubscribeSnapshot();
           } catch (err: any) {
             console.error("Error processing payment:", err);
             setError(err.message || "An error occurred while processing your payment");
-          } finally {
             setLoading(false);
           }
         });
 
-        // Cleanup subscription
+        // Cleanup auth subscription
         return () => unsubscribe();
       } catch (err: any) {
         console.error("Error in payment process:", err);

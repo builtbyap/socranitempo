@@ -252,94 +252,73 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
   });
 });
 
-export const handleSuccessfulPayment = functions.https.onCall(async (request) => {
+export const handleSuccessfulPayment = functions.https.onCall(async (data, context) => {
   try {
-    const { sessionId } = request.data;
-    const userId = request.auth?.uid;
-
-    if (!userId) {
-      throw new Error("User not authenticated");
+    // Check if user is authenticated
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "User must be authenticated to process payment"
+      );
     }
 
+    const { sessionId } = data;
     if (!sessionId) {
-      throw new Error("No session ID provided");
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Session ID is required"
+      );
     }
 
-    // Get the session from Stripe
+    // Retrieve the session from Stripe
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-    
     if (!session) {
-      throw new Error("No session found");
+      throw new functions.https.HttpsError(
+        "not-found",
+        "Session not found"
+      );
     }
 
-    // Get the customer ID from the session
+    // Get the customer ID and subscription ID from the session
     const customerId = session.customer as string;
-    
-    if (!customerId) {
-      throw new Error("No customer ID found in session");
-    }
-
-    // Get the subscription ID from the session
     const subscriptionId = session.subscription as string;
-    
-    if (!subscriptionId) {
-      throw new Error("No subscription ID found in session");
+
+    if (!customerId || !subscriptionId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Invalid session data"
+      );
     }
 
-    // Get the subscription details from Stripe
+    // Get the subscription details
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    
-    if (!subscription) {
-      throw new Error("No subscription found");
-    }
-
-    // Get the price ID from the subscription
-    const priceId = subscription.items.data[0]?.price.id;
-    
-    if (!priceId) {
-      throw new Error("No price ID found in subscription");
-    }
-
-    // Get the product ID from the price
-    const price = await stripe.prices.retrieve(priceId);
-    const productId = price.product as string;
-    
-    if (!productId) {
-      throw new Error("No product ID found in price");
-    }
+    const priceId = subscription.items.data[0].price.id;
+    const productId = subscription.items.data[0].price.product as string;
 
     // Get the product details
     const product = await stripe.products.retrieve(productId);
-    
-    if (!product) {
-      throw new Error("No product found");
-    }
+    const tier = product.metadata.tier || "basic";
 
-    // Update the user's document with subscription details
-    const userRef = admin.firestore().collection('customers').doc(userId);
-    await userRef.update({
-      stripeCustomerId: customerId,
-      stripeSubscriptionId: subscriptionId,
-      stripePriceId: priceId,
-      stripeProductId: productId,
-      subscriptionStatus: subscription.status,
-      subscriptionTier: product.metadata.tier || "basic",
-      subscriptionStartDate: new Date(subscription.current_period_start * 1000),
-      subscriptionEndDate: new Date(subscription.current_period_end * 1000),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    // The Stripe Firestore extension will automatically update the customer document
+    // with the subscription details, so we don't need to do it manually
 
     return {
       success: true,
       subscription: {
+        customerId,
+        subscriptionId,
+        priceId,
+        productId,
+        tier,
         status: subscription.status,
-        tier: product.metadata.tier || "basic",
-        startDate: new Date(subscription.current_period_start * 1000),
-        endDate: new Date(subscription.current_period_end * 1000)
+        currentPeriodEnd: subscription.current_period_end
       }
     };
   } catch (error: any) {
-    console.error("Error in handleSuccessfulPayment:", error);
-    throw new Error(error.message || "Failed to process payment");
+    console.error("Error handling successful payment:", error);
+    throw new functions.https.HttpsError(
+      "internal",
+      error.message || "An error occurred while processing the payment"
+    );
   }
 }); 
