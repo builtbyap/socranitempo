@@ -324,21 +324,29 @@ export const handleSuccessfulPayment = functions.https.onCall(async (data, conte
       tier: tier
     });
 
-    // Update the customer document with subscription details
+    // Update the customer document with basic info
     const customerRef = admin.firestore().collection('customers').doc(context.auth.uid);
-    await customerRef.update({
+    await customerRef.set({
       stripeCustomerId: customerId,
       stripeSubscriptionId: subscriptionId,
-      stripePriceId: priceId,
-      stripeProductId: productId,
-      subscriptionStatus: subscription.status,
-      subscriptionTier: tier,
-      subscriptionStartDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_start * 1000),
-      subscriptionEndDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    // Create/update the subscription document
+    const subscriptionRef = customerRef.collection('subscriptions').doc(subscriptionId);
+    await subscriptionRef.set({
+      status: subscription.status,
+      priceId: priceId,
+      productId: productId,
+      tier: tier,
+      currentPeriodStart: admin.firestore.Timestamp.fromMillis(subscription.current_period_start * 1000),
+      currentPeriodEnd: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
+      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      createdAt: admin.firestore.Timestamp.fromMillis(subscription.created * 1000),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    console.log("Customer document updated successfully");
+    console.log("Customer and subscription documents updated successfully");
 
     return {
       success: true,

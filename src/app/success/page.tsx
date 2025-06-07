@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { auth, db } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, getDoc } from "firebase/firestore";
 
 function SuccessContent() {
   const router = useRouter();
@@ -45,19 +45,34 @@ function SuccessContent() {
           console.log("User authenticated:", user.uid);
 
           try {
-            // Listen for changes to the user's subscription status
-            const userRef = doc(db, "customers", user.uid);
-            console.log("Setting up Firestore listener for user:", user.uid);
+            // First, get the customer document to find the subscription ID
+            const customerRef = doc(db, "customers", user.uid);
+            const customerDoc = await getDoc(customerRef);
+            const customerData = customerDoc.data();
+            
+            if (!customerData?.stripeSubscriptionId) {
+              console.error("No subscription ID found in customer document");
+              setError("Unable to find subscription details. Please contact support.");
+              setLoading(false);
+              return;
+            }
 
-            const unsubscribeSnapshot = onSnapshot(userRef, (doc) => {
+            const subscriptionId = customerData.stripeSubscriptionId;
+            console.log("Found subscription ID:", subscriptionId);
+
+            // Listen for changes to the subscription status
+            const subscriptionRef = doc(db, "customers", user.uid, "subscriptions", subscriptionId);
+            console.log("Setting up Firestore listener for subscription:", subscriptionId);
+
+            const unsubscribeSnapshot = onSnapshot(subscriptionRef, (doc) => {
               const data = doc.data();
               console.log("Firestore update received:", data);
 
               if (data) {
-                setSubscriptionStatus(data.subscriptionStatus || "unknown");
+                setSubscriptionStatus(data.status || "unknown");
                 
                 // Check for active subscription
-                if (data.subscriptionStatus === "active") {
+                if (data.status === "active") {
                   console.log("Subscription is active, setting success state");
                   setSuccess(true);
                   // Wait a moment to show the success state
@@ -65,24 +80,24 @@ function SuccessContent() {
                     console.log("Redirecting to dashboard");
                     router.push("/dashboard?payment=success");
                   }, 2000);
-                } else if (data.subscriptionStatus === "trialing") {
+                } else if (data.status === "trialing") {
                   console.log("Subscription is in trial period");
                   setSuccess(true);
                   setTimeout(() => {
                     router.push("/dashboard?payment=success");
                   }, 2000);
-                } else if (data.subscriptionStatus === "incomplete") {
+                } else if (data.status === "incomplete") {
                   console.log("Subscription is incomplete");
                   setError("Your subscription is still being processed. Please wait a moment.");
-                } else if (data.subscriptionStatus === "past_due") {
+                } else if (data.status === "past_due") {
                   console.log("Subscription is past due");
                   setError("There was an issue with your payment. Please check your payment method.");
                 } else {
-                  console.log("Unknown subscription status:", data.subscriptionStatus);
+                  console.log("Unknown subscription status:", data.status);
                   setError("Unable to verify subscription status. Please contact support.");
                 }
               } else {
-                console.log("No user data found in Firestore");
+                console.log("No subscription data found in Firestore");
                 setError("Unable to find your subscription details. Please contact support.");
               }
               setLoading(false);
