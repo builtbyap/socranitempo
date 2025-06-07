@@ -362,6 +362,14 @@ export const signInWithGoogle = async () => {
     const user = result.user;
     console.log('Google sign-in successful for user:', user.uid);
 
+    if (!user.email) {
+      console.error('No email provided by Google sign-in');
+      return {
+        success: false,
+        error: 'No email provided by Google sign-in'
+      };
+    }
+
     // Create customer record using the Stripe Firestore extension
     console.log('Creating customer record...');
     const createCustomer = httpsCallable<{ userId: string, email: string }, { customerId: string }>(
@@ -370,10 +378,17 @@ export const signInWithGoogle = async () => {
     );
     
     try {
+      console.log('Calling createCustomer function with:', {
+        userId: user.uid,
+        email: user.email
+      });
+      
       const { data: customerData } = await createCustomer({ 
         userId: user.uid, 
-        email: user.email || '' 
+        email: user.email
       });
+
+      console.log('Customer creation response:', customerData);
 
       if (!customerData?.customerId) {
         console.error('No customerId returned from createCustomer function');
@@ -386,6 +401,13 @@ export const signInWithGoogle = async () => {
       console.log('Customer record created successfully:', customerData.customerId);
     } catch (error: any) {
       console.error('Error creating customer:', error);
+      // Log more details about the error
+      console.error('Error details:', {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        stack: error.stack
+      });
       return { 
         success: false, 
         error: 'Failed to create customer record',
