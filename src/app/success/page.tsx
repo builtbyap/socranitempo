@@ -10,7 +10,6 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { Suspense } from 'react';
-import { handleSuccessfulPayment } from "@/lib/firebase/functions";
 
 export default function SuccessPage() {
   return (
@@ -78,16 +77,18 @@ function SuccessContent() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Accept': 'application/json',
           },
           body: JSON.stringify({
             sessionId,
             userId: user.uid
           }),
-          credentials: 'include'
+          mode: 'cors',
+          credentials: 'omit'
         });
 
         if (!response.ok) {
-          const errorData = await response.json();
+          const errorData = await response.json().catch(() => ({ error: 'Failed to process payment' }));
           throw new Error(errorData.error || 'Failed to process payment');
         }
 

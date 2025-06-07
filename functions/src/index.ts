@@ -253,12 +253,15 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
 });
 
 export const handleSuccessfulPayment = functions.https.onRequest(async (req, res) => {
+  // Set CORS headers for all responses
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.set("Access-Control-Allow-Credentials", "true");
+
   // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.status(204).send('');
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
     return;
   }
 
@@ -274,18 +277,18 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
     // Get the session ID from the request body
     const { sessionId } = req.body;
     if (!sessionId) {
-      throw new Error('No session ID provided');
+      throw new Error("No session ID provided");
     }
 
-    console.log('Processing payment for session:', sessionId);
+    console.log("Processing payment for session:", sessionId);
 
     // Retrieve the session from Stripe
     const session = await stripe.checkout.sessions.retrieve(sessionId);
     if (!session) {
-      throw new Error('Session not found');
+      throw new Error("Session not found");
     }
 
-    console.log('Session retrieved:', {
+    console.log("Session retrieved:", {
       id: session.id,
       status: session.status,
       customer: session.customer,
@@ -297,12 +300,12 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
     const subscriptionId = session.subscription as string;
 
     if (!customerId || !subscriptionId) {
-      throw new Error('Invalid session data');
+      throw new Error("Invalid session data");
     }
 
     // Get the subscription details
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    console.log('Subscription retrieved:', {
+    console.log("Subscription retrieved:", {
       id: subscription.id,
       status: subscription.status,
       currentPeriodEnd: subscription.current_period_end
@@ -313,9 +316,9 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
 
     // Get the product details
     const product = await stripe.products.retrieve(productId);
-    const tier = product.metadata.tier || 'basic';
+    const tier = product.metadata.tier || "basic";
 
-    console.log('Product details:', {
+    console.log("Product details:", {
       id: product.id,
       name: product.name,
       tier: tier
@@ -324,7 +327,7 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
     // Get the user ID from the session metadata
     const userId = session.metadata?.userId;
     if (!userId) {
-      throw new Error('No user ID found in session metadata');
+      throw new Error("No user ID found in session metadata");
     }
 
     // Update the customer document with subscription info
@@ -355,7 +358,7 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    console.log('Customer and subscription documents updated successfully');
+    console.log("Customer and subscription documents updated successfully");
 
     // Send success response
     res.status(200).json({
@@ -371,10 +374,10 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       }
     });
   } catch (error: any) {
-    console.error('Error handling successful payment:', error);
+    console.error("Error handling successful payment:", error);
     res.status(500).json({
       success: false,
-      error: error.message || 'An error occurred while processing the payment'
+      error: error.message || "An error occurred while processing the payment"
     });
   }
 }); 
