@@ -1,12 +1,14 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { XCircle } from "lucide-react";
+import { XCircle, Loader2 } from "lucide-react";
 
-export default function CancelPage() {
+function CancelContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -32,5 +34,20 @@ export default function CancelPage() {
         </CardFooter>
       </Card>
     </div>
+  );
+}
+
+export default function CancelPage() {
+  return (
+    <Suspense fallback={
+      <div className="container mx-auto px-4 py-8 flex justify-center items-center min-h-[60vh]">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+          <p className="text-lg">Loading...</p>
+        </div>
+      </div>
+    }>
+      <CancelContent />
+    </Suspense>
   );
 } 
