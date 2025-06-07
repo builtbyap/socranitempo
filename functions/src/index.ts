@@ -1,7 +1,18 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
+import * as cors from 'cors';
 
 admin.initializeApp();
+
+const corsHandler = cors({
+  origin: [
+    'http://localhost:3000',
+    'https://socrani.com',
+    'https://socranitempo.vercel.app',
+    'https://socrani-18328.web.app'
+  ],
+  credentials: true
+});
 
 // Function to create a customer record when a new user signs up
 export const onCreateUser = functions.auth.user().onCreate(async (user) => {
@@ -70,4 +81,26 @@ export const createCustomer = functions.https.onCall(async (data, context) => {
       'Failed to create customer record'
     );
   }
+});
+
+export const createCheckoutSession = functions.https.onRequest((req, res) => {
+  return corsHandler(req, res, async () => {
+    try {
+      // ... existing code ...
+    } catch (error) {
+      console.error('Error creating checkout session:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+});
+
+export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
+  return corsHandler(req, res, async () => {
+    try {
+      // ... existing code ...
+    } catch (error) {
+      console.error('Error getting subscription status:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 }); 

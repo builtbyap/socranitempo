@@ -1,7 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getFirestore, doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'firebase/functions';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -18,7 +18,23 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const functions = getFunctions(app, 'us-central1');
 
-export { app, auth, db, functions };
+// Configure functions to use the correct region and handle CORS
+if (process.env.NODE_ENV === 'development') {
+  connectFunctionsEmulator(functions, 'localhost', 5001);
+}
+
+// Set up CORS configuration for functions
+const corsConfig = {
+  origin: [
+    'http://localhost:3000',
+    'https://socrani.com',
+    'https://socranitempo.vercel.app',
+    'https://socrani-18328.web.app'
+  ],
+  credentials: true
+};
+
+export { app, auth, db, functions, corsConfig };
 
 // Authentication functions
 export const signIn = async (email: string, password: string) => {
@@ -251,15 +267,35 @@ export const getSubscriptionStatus = async (userId: string) => {
 // Function to create a Stripe checkout session
 export const createCheckoutSession = async (priceId: string) => {
   try {
-    const createCheckoutSession = httpsCallable<{ priceId: string }, { sessionId: string }>(
+    if (!auth.currentUser) {
+      console.error('No authenticated user found');
+      return { success: false, error: 'User must be authenticated' };
+    }
+
+    console.log('Creating checkout session for price:', priceId);
+    
+    const createCheckoutSessionFunction = httpsCallable<{ priceId: string }, { sessionId: string }>(
       functions,
-      'ext-firebase-stripe-createCheckoutSession'
+      'createCheckoutSession'
     );
-    const { data } = await createCheckoutSession({ priceId });
-    return { success: true, sessionId: data.sessionId };
-  } catch (error) {
+
+    const result = await createCheckoutSessionFunction({ priceId });
+    
+    if (!result.data?.sessionId) {
+      console.error('No session ID returned from createCheckoutSession');
+      return { success: false, error: 'Failed to create checkout session' };
+    }
+
+    console.log('Checkout session created successfully:', result.data.sessionId);
+    return { success: true, sessionId: result.data.sessionId };
+  } catch (error: any) {
     console.error('Error creating checkout session:', error);
-    return { success: false, error };
+    return { 
+      success: false, 
+      error: error.message || 'Failed to create checkout session',
+      details: error.details || error,
+      code: error.code || 'unknown'
+    };
   }
 };
 
