@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createCheckoutSession } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
+import { corsMiddleware, corsOptionsMiddleware } from "@/lib/cors";
 
 export async function POST(req: NextRequest) {
   try {
+    // Apply CORS middleware
+    const corsResponse = corsMiddleware(req);
+    if (corsResponse.status !== 200) {
+      return corsResponse;
+    }
+
     const { priceId } = await req.json();
 
     if (!priceId) {
@@ -42,13 +49,6 @@ export async function POST(req: NextRequest) {
 }
 
 // Handle CORS preflight requests
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    },
-  });
+export async function OPTIONS(req: NextRequest) {
+  return corsOptionsMiddleware(req);
 } 
