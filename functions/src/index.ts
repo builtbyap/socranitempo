@@ -350,9 +350,12 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       throw new Error("User email not found");
     }
 
+    // Create a batch write to ensure atomic updates
+    const batch = admin.firestore().batch();
+
     // Update the customer document with subscription info and additional details
     const customerRef = admin.firestore().collection('customers').doc(userId);
-    await customerRef.set({
+    const customerData = {
       email: userEmail,
       stripeCustomerId: customerId,
       stripeCustomerLink: portalSession.url,
@@ -364,11 +367,14 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       subscriptionStartDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_start * 1000),
       subscriptionEndDate: admin.firestore.Timestamp.fromMillis(subscription.current_period_end * 1000),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
+    };
+
+    console.log("Updating customer document with data:", customerData);
+    batch.set(customerRef, customerData, { merge: true });
 
     // Create/update the subscription document
     const subscriptionRef = customerRef.collection('subscriptions').doc(subscriptionId);
-    await subscriptionRef.set({
+    const subscriptionData = {
       status: subscription.status,
       priceId: priceId,
       productId: productId,
@@ -378,9 +384,14 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
       createdAt: admin.firestore.Timestamp.fromMillis(subscription.created * 1000),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+    };
 
-    console.log("Customer and subscription documents updated successfully");
+    console.log("Updating subscription document with data:", subscriptionData);
+    batch.set(subscriptionRef, subscriptionData);
+
+    // Commit the batch
+    await batch.commit();
+    console.log("Successfully committed batch updates to Firestore");
 
     // Send success response
     res.status(200).json({
