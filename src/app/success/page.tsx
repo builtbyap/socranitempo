@@ -77,14 +77,11 @@ function SuccessContent() {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Accept': 'application/json',
+            'Accept': 'application/json'
           },
-          body: JSON.stringify({
-            sessionId,
-            userId: user.uid
-          }),
+          body: JSON.stringify({ sessionId }),
           mode: 'cors',
-          credentials: 'omit'
+          credentials: 'include'
         });
 
         if (!response.ok) {

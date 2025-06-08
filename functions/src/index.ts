@@ -253,17 +253,22 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
 });
 
 export const handleSuccessfulPayment = functions.https.onRequest(async (req, res) => {
-  // Set CORS headers for all responses
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.set("Access-Control-Allow-Credentials", "true");
-
   // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Max-Age', '3600');
+    res.status(204).send('');
     return;
   }
+
+  // Set CORS headers for all responses
+  res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Allow-Credentials', 'true');
 
   // Wrap the CORS handler in a promise
   await new Promise((resolve, reject) => {
