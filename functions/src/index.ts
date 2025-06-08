@@ -303,6 +303,18 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       throw new Error("Invalid session data");
     }
 
+    // Get the customer details from Stripe
+    const customer = await stripe.customers.retrieve(customerId);
+    if (!customer || customer.deleted) {
+      throw new Error("Customer not found in Stripe");
+    }
+
+    // Get the customer portal URL
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: 'https://socrani.com/dashboard'
+    });
+
     // Get the subscription details
     const subscription = await stripe.subscriptions.retrieve(subscriptionId);
     console.log("Subscription retrieved:", {
@@ -330,10 +342,20 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       throw new Error("No user ID found in session metadata");
     }
 
-    // Update the customer document with subscription info
+    // Get the user's email from Firebase Auth
+    const userRecord = await admin.auth().getUser(userId);
+    const userEmail = userRecord.email;
+
+    if (!userEmail) {
+      throw new Error("User email not found");
+    }
+
+    // Update the customer document with subscription info and additional details
     const customerRef = admin.firestore().collection('customers').doc(userId);
     await customerRef.set({
+      email: userEmail,
       stripeCustomerId: customerId,
+      stripeCustomerLink: portalSession.url,
       stripeSubscriptionId: subscriptionId,
       stripePriceId: priceId,
       stripeProductId: productId,
@@ -370,7 +392,8 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
         productId,
         tier,
         status: subscription.status,
-        currentPeriodEnd: subscription.current_period_end
+        currentPeriodEnd: subscription.current_period_end,
+        customerPortalUrl: portalSession.url
       }
     });
   } catch (error: any) {
