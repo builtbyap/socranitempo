@@ -13,12 +13,7 @@ const corsHandler = cors({
 });
 
 // Initialize Stripe with Firebase config
-const stripeSecretKey = functions.config().stripe?.secret_key;
-if (!stripeSecretKey) {
-  throw new Error('Stripe secret key is not configured. Please set it using: firebase functions:config:set stripe.secret_key="YOUR_STRIPE_SECRET_KEY"');
-}
-
-const stripe = new Stripe(stripeSecretKey, {
+const stripe = new Stripe(functions.config().stripe.secret_key, {
   apiVersion: '2023-10-16',
 });
 
@@ -93,84 +88,102 @@ export const createCustomer = functions.https.onCall(async (data, context) => {
 
 export const createCheckoutSession = functions.https.onCall(async (data, context) => {
   try {
+    // Log the incoming request data
+    console.log("Received request data:", data);
+    console.log("Auth context:", context.auth);
+
     // Check if user is authenticated
     if (!context.auth) {
+      console.error("No authenticated user found");
       throw new functions.https.HttpsError(
-        'unauthenticated',
-        'User must be authenticated to create a checkout session'
+        "unauthenticated",
+        "User must be authenticated to create a checkout session"
       );
     }
 
     const { priceId } = data;
-    const userId = context.auth.uid;
-
-    console.log("Creating checkout session for user:", userId);
     console.log("Price ID:", priceId);
 
-    if (!priceId) {
+    // Validate price ID
+    if (!priceId || typeof priceId !== "string") {
+      console.error("Invalid price ID:", priceId);
       throw new functions.https.HttpsError(
-        'invalid-argument',
-        'Missing required field: priceId'
+        "invalid-argument",
+        "Price ID is required and must be a string"
       );
     }
 
-    // Validate price ID format
     if (!priceId.startsWith("price_")) {
+      console.error("Invalid price ID format:", priceId);
       throw new functions.https.HttpsError(
-        'invalid-argument',
-        'Invalid price ID format'
+        "invalid-argument",
+        "Invalid price ID format"
       );
     }
 
-    // Get user email from Firebase Auth
-    let userRecord;
+    // Get user email
+    const user = await admin.auth().getUser(context.auth.uid);
+    console.log("User details:", user);
+
+    if (!user.email) {
+      console.error("User has no email:", user);
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "User must have an email address"
+      );
+    }
+
+    // Verify the price exists in Stripe
     try {
-      userRecord = await admin.auth().getUser(userId);
-      console.log("Retrieved user:", userRecord.email);
+      const price = await stripe.prices.retrieve(priceId);
+      console.log("Retrieved price:", price);
     } catch (error) {
-      console.error("Error getting user:", error);
+      console.error("Error retrieving price:", error);
       throw new functions.https.HttpsError(
-        'internal',
-        'Failed to get user information'
+        "invalid-argument",
+        "Invalid price ID"
       );
     }
 
-    if (!userRecord.email) {
-      throw new functions.https.HttpsError(
-        'failed-precondition',
-        'User email not found'
-      );
-    }
-
-    // Create Stripe checkout session
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
+    // Create checkout session
+    try {
+      const session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price: priceId,
+            quantity: 1,
+          },
+        ],
+        success_url: `${functions.config().app.url}/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${functions.config().app.url}/pricing`,
+        customer_email: user.email,
+        metadata: {
+          userId: context.auth.uid,
         },
-      ],
-      mode: 'subscription',
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
-      customer_email: userRecord.email,
-      metadata: {
-        userId: userId,
-      },
-    });
+      });
 
-    console.log('Created Stripe session:', session.id);
+      console.log("Created checkout session:", session);
 
-    return {
-      sessionId: session.id,
-      url: session.url,
-    };
+      return {
+        sessionId: session.id,
+        url: session.url,
+      };
+    } catch (error) {
+      console.error("Error creating checkout session:", error);
+      throw new functions.https.HttpsError(
+        "internal",
+        "Failed to create checkout session",
+        error
+      );
+    }
   } catch (error) {
-    console.error('Error creating checkout session:', error);
+    console.error("Unexpected error:", error);
     throw new functions.https.HttpsError(
-      'internal',
-      'Failed to create checkout session'
+      "internal",
+      "An unexpected error occurred",
+      error
     );
   }
 });
