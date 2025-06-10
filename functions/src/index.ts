@@ -91,48 +91,55 @@ export const createCustomer = functions.https.onCall(async (data, context) => {
   }
 });
 
-export const createCheckoutSession = functions.https.onRequest(async (req, res) => {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.set('Access-Control-Allow-Credentials', 'true');
-    res.set('Access-Control-Max-Age', '3600');
-    res.status(204).send('');
-    return;
-  }
-
-  // Set CORS headers for all responses
-  res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.set('Access-Control-Allow-Credentials', 'true');
-
+export const createCheckoutSession = functions.https.onCall(async (data, context) => {
   try {
-    // Log the full request for debugging
-    console.log("Request headers:", req.headers);
-    console.log("Request body:", req.body);
+    // Check if user is authenticated
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        'unauthenticated',
+        'User must be authenticated to create a checkout session'
+      );
+    }
 
-    // Parse request body
-    const { priceId } = req.body;
-    console.log("Price ID from request:", priceId);
+    const { priceId } = data;
+    const userId = context.auth.uid;
+
+    console.log("Creating checkout session for user:", userId);
+    console.log("Price ID:", priceId);
 
     if (!priceId) {
-      console.error("Missing priceId in request");
-      res.status(400).json({
-        error: "Missing required field: priceId",
-      });
-      return;
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Missing required field: priceId'
+      );
     }
 
     // Validate price ID format
     if (!priceId.startsWith("price_")) {
-      console.error("Invalid price ID format:", priceId);
-      res.status(400).json({
-        error: "Invalid price ID format",
-      });
-      return;
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Invalid price ID format'
+      );
+    }
+
+    // Get user email from Firebase Auth
+    let userRecord;
+    try {
+      userRecord = await admin.auth().getUser(userId);
+      console.log("Retrieved user:", userRecord.email);
+    } catch (error) {
+      console.error("Error getting user:", error);
+      throw new functions.https.HttpsError(
+        'internal',
+        'Failed to get user information'
+      );
+    }
+
+    if (!userRecord.email) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'User email not found'
+      );
     }
 
     // Create Stripe checkout session
@@ -145,22 +152,26 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
         },
       ],
       mode: 'subscription',
-      success_url: `${req.headers.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${req.headers.origin}/pricing`,
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
+      customer_email: userRecord.email,
+      metadata: {
+        userId: userId,
+      },
     });
 
     console.log('Created Stripe session:', session.id);
 
-    // Return the session ID and URL
-    res.status(200).json({
+    return {
       sessionId: session.id,
       url: session.url,
-    });
+    };
   } catch (error) {
     console.error('Error creating checkout session:', error);
-    res.status(500).json({
-      error: 'Failed to create checkout session',
-    });
+    throw new functions.https.HttpsError(
+      'internal',
+      'Failed to create checkout session'
+    );
   }
 });
 
