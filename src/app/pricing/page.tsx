@@ -30,6 +30,8 @@ const handleSubscribe = async (priceId: string) => {
 
     // Call the function
     const result = await createCheckoutSession({ priceId });
+    console.log("Checkout session result:", result);
+
     const { url } = result.data as { url: string };
 
     if (!url) {
@@ -39,9 +41,19 @@ const handleSubscribe = async (priceId: string) => {
 
     console.log("Redirecting to checkout:", url);
     window.location.href = url;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Payment error:", error);
-    alert(error instanceof Error ? error.message : "An error occurred while processing your payment");
+    
+    // Handle specific Firebase error codes
+    if (error.code === 'functions/unauthenticated') {
+      alert("Please sign in to subscribe");
+    } else if (error.code === 'functions/invalid-argument') {
+      alert("Invalid price ID. Please try again.");
+    } else if (error.code === 'functions/failed-precondition') {
+      alert("Please make sure you have a valid email address in your account.");
+    } else {
+      alert(error.message || "An error occurred while processing your payment. Please try again.");
+    }
   }
 };
 
@@ -216,10 +228,10 @@ export default function PricingPage() {
               </p>
               <p className="mt-6 flex items-baseline gap-x-1">
                 <span className="text-4xl font-bold tracking-tight text-gray-900">
-                  $49
+                  $50
                 </span>
                 <span className="text-sm font-semibold leading-6 text-gray-600">
-                  /month
+                  /year
                 </span>
               </p>
               <ul
@@ -257,11 +269,11 @@ export default function PricingPage() {
               </ul>
             </div>
             <button
-              onClick={() => onSubscribe("price_1RYHRjCyTrsNmVMYWjpG3SDR")}
-              disabled={loading === "price_1RYHRjCyTrsNmVMYWjpG3SDR"}
+              onClick={() => onSubscribe("price_1RYHSoCyTrsNmVMYLMJl54HW")}
+              disabled={loading === "price_1RYHSoCyTrsNmVMYLMJl54HW"}
               className="mt-8 block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading === "price_1RYHRjCyTrsNmVMYWjpG3SDR"
+              {loading === "price_1RYHSoCyTrsNmVMYLMJl54HW"
                 ? "Processing..."
                 : "Subscribe now"}
             </button>
