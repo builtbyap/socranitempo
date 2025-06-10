@@ -110,25 +110,80 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
   res.set('Access-Control-Allow-Credentials', 'true');
 
   try {
-    // Parse request body
-    const { priceId, userId } = req.body;
-    console.log('Received request with priceId:', priceId, 'userId:', userId);
+    // Log the full request for debugging
+    console.log("Request headers:", req.headers);
+    console.log("Request body:", req.body);
 
-    if (!priceId || !userId) {
-      console.error('Missing required fields:', { priceId, userId });
+    // Verify Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error("Missing or invalid Authorization header");
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    // Verify Firebase token
+    const idToken = authHeader.split('Bearer ')[1];
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken);
+      console.log("Verified user:", decodedToken.uid);
+    } catch (error) {
+      console.error("Error verifying token:", error);
+      res.status(401).json({ error: "Invalid authentication token" });
+      return;
+    }
+
+    // Parse request body
+    const { priceId } = req.body;
+    const userId = decodedToken.uid; // Use the verified user ID from the token
+    console.log("Parsed request data:", { priceId, userId });
+
+    if (!priceId) {
+      console.error("Missing priceId in request");
       res.status(400).json({
-        error: 'Missing required fields: priceId and userId are required',
+        error: "Missing required field: priceId",
+      });
+      return;
+    }
+
+    // Validate price ID format
+    if (!priceId.startsWith("price_")) {
+      console.error("Invalid price ID format:", priceId);
+      res.status(400).json({
+        error: "Invalid price ID format",
       });
       return;
     }
 
     // Get user email from Firebase Auth
-    const userRecord = await admin.auth().getUser(userId);
-    console.log('Retrieved user:', userRecord.email);
+    let userRecord;
+    try {
+      userRecord = await admin.auth().getUser(userId);
+      console.log("Retrieved user:", userRecord.email);
+    } catch (error) {
+      console.error("Error getting user:", error);
+      res.status(400).json({
+        error: "Invalid user ID",
+      });
+      return;
+    }
 
     if (!userRecord.email) {
-      console.error('User has no email:', userId);
-      res.status(400).json({ error: 'User email not found' });
+      console.error("User has no email:", userId);
+      res.status(400).json({ error: "User email not found" });
+      return;
+    }
+
+    // Validate the price ID with Stripe
+    try {
+      const price = await stripe.prices.retrieve(priceId);
+      console.log("Validated price:", price.id);
+    } catch (error) {
+      console.error("Invalid price ID:", error);
+      res.status(400).json({
+        error: "Invalid price ID",
+      });
       return;
     }
 
@@ -160,7 +215,7 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
   } catch (error) {
     console.error('Error creating checkout session:', error);
     res.status(500).json({
-      error: error instanceof Error ? error.message : 'Internal server error',
+      error: 'Failed to create checkout session',
     });
   }
 });

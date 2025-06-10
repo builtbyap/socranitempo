@@ -18,8 +18,11 @@ const handleSubscribe = async (priceId: string) => {
     console.log("Creating checkout session for user:", user.uid);
     console.log("Price ID:", priceId);
 
-    // Get the ID token
-    const idToken = await user.getIdToken();
+    // Get a fresh ID token
+    const idToken = await user.getIdToken(true);
+    if (!idToken) {
+      throw new Error("Failed to get authentication token");
+    }
 
     // Validate price ID format
     if (!priceId.startsWith("price_")) {
@@ -36,19 +39,18 @@ const handleSubscribe = async (priceId: string) => {
         },
         body: JSON.stringify({
           priceId,
-          userId: user.uid,
         }),
         credentials: "include",
       }
     );
 
-    const data = await response.json();
-
     if (!response.ok) {
-      console.error("Server error:", data);
-      throw new Error(data.error || "Failed to create checkout session");
+      const errorData = await response.json();
+      console.error("Server error:", errorData);
+      throw new Error(errorData.error || "Failed to create checkout session");
     }
 
+    const data = await response.json();
     if (!data.url) {
       console.error("No URL in response:", data);
       throw new Error("No checkout URL received");
