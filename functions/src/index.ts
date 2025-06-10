@@ -94,73 +94,43 @@ export const createCustomer = functions.https.onCall(async (data, context) => {
 export const createCheckoutSession = functions.https.onRequest(async (req, res) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.set('Access-Control-Allow-Credentials', 'true');
-    res.set('Access-Control-Max-Age', '3600');
+    res.set('Access-Control-Allow-Headers', 'Content-Type');
     res.status(204).send('');
     return;
   }
 
   // Set CORS headers for all responses
-  res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.set('Access-Control-Allow-Credentials', 'true');
-
-  // Wrap the CORS handler in a promise
-  await new Promise((resolve, reject) => {
-    corsHandler(req, res, (err) => {
-      if (err) reject(err);
-      resolve(true);
-    });
-  });
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
 
   try {
-    console.log('Request body:', req.body);
-    console.log('Request headers:', req.headers);
-
+    // Parse request body
     const { priceId, userId } = req.body;
+    console.log('Received request with priceId:', priceId, 'userId:', userId);
 
-    if (!priceId) {
-      console.error('No priceId provided');
-      throw new Error('Price ID is required');
+    if (!priceId || !userId) {
+      console.error('Missing required fields:', { priceId, userId });
+      res.status(400).json({
+        error: 'Missing required fields: priceId and userId are required',
+      });
+      return;
     }
 
-    if (!userId) {
-      console.error('No userId provided');
-      throw new Error('User ID is required');
+    // Get user email from Firebase Auth
+    const userRecord = await admin.auth().getUser(userId);
+    console.log('Retrieved user:', userRecord.email);
+
+    if (!userRecord.email) {
+      console.error('User has no email:', userId);
+      res.status(400).json({ error: 'User email not found' });
+      return;
     }
 
-    // Get the user's email from Firebase Auth
-    let userEmail;
-    try {
-      const userRecord = await admin.auth().getUser(userId);
-      userEmail = userRecord.email;
-      console.log('User email retrieved:', userEmail);
-    } catch (error) {
-      console.error('Error getting user:', error);
-      throw new Error('Failed to get user information');
-    }
-
-    if (!userEmail) {
-      console.error('No email found for user');
-      throw new Error('User email not found');
-    }
-
-    // Validate the price ID
-    try {
-      const price = await stripe.prices.retrieve(priceId);
-      console.log('Price validated:', price.id);
-    } catch (error) {
-      console.error('Invalid price ID:', error);
-      throw new Error('Invalid price ID');
-    }
-
-    // Create a checkout session
+    // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
       payment_method_types: ['card'],
       line_items: [
         {
@@ -168,27 +138,26 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
           quantity: 1,
         },
       ],
+      mode: 'subscription',
       success_url: `${req.headers.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${req.headers.origin}/pricing`,
-      customer_email: userEmail,
+      customer_email: userRecord.email,
       metadata: {
-        userId: userId
+        userId: userId,
       },
-      billing_address_collection: 'required',
-      allow_promotion_codes: true
     });
 
-    console.log('Checkout session created:', session.id);
+    console.log('Created Stripe session:', session.id);
 
+    // Return the session ID and URL
     res.status(200).json({
       sessionId: session.id,
-      url: session.url
+      url: session.url,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error creating checkout session:', error);
     res.status(500).json({
-      error: error.message || 'An error occurred while creating the checkout session',
-      details: error.stack
+      error: error instanceof Error ? error.message : 'Internal server error',
     });
   }
 });

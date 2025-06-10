@@ -32,17 +32,23 @@ const handleSubscribe = async (priceId: string) => {
       }
     );
 
+    const data = await response.json();
+
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || "Failed to create checkout session");
+      console.error("Server error:", data);
+      throw new Error(data.error || "Failed to create checkout session");
     }
 
-    const { sessionId, url } = await response.json();
-    console.log("Checkout session created:", sessionId);
-    window.location.href = url;
+    if (!data.url) {
+      console.error("No URL in response:", data);
+      throw new Error("No checkout URL received");
+    }
+
+    console.log("Redirecting to checkout:", data.url);
+    window.location.href = data.url;
   } catch (error) {
-    console.error("Error creating checkout session:", error);
-    alert("Failed to process payment. Please try again.");
+    console.error("Payment error:", error);
+    alert(error instanceof Error ? error.message : "An error occurred while processing your payment");
   }
 };
 
