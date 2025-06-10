@@ -1,3 +1,5 @@
+"use client";
+
 import Navbar from "@/components/navbar";
 import { Button } from "@/components/ui/button";
 import { Check } from "lucide-react";
@@ -9,58 +11,50 @@ const handleSubscribe = async (priceId: string) => {
   try {
     const user = auth.currentUser;
     if (!user) {
-      throw new Error('User must be logged in to subscribe');
+      alert("Please sign in to subscribe");
+      return;
     }
 
-    console.log('Creating checkout session for user:', user.uid);
-    console.log('Price ID:', priceId);
+    console.log("Creating checkout session for user:", user.uid);
+    console.log("Price ID:", priceId);
 
-    const response = await fetch('https://us-central1-socrani-18328.cloudfunctions.net/createCheckoutSession', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify({
-        priceId,
-        userId: user.uid
-      }),
-      mode: 'cors',
-      credentials: 'include'
-    });
-
-    const data = await response.json();
+    const response = await fetch(
+      "https://us-central1-socrani-18328.cloudfunctions.net/createCheckoutSession",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          priceId,
+          userId: user.uid,
+        }),
+      }
+    );
 
     if (!response.ok) {
-      console.error('Server error:', data);
-      throw new Error(data.error || 'Failed to create checkout session');
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to create checkout session");
     }
 
-    if (!data.url) {
-      console.error('No URL in response:', data);
-      throw new Error('No checkout URL received');
-    }
-
-    console.log('Redirecting to checkout:', data.url);
-    window.location.href = data.url;
-  } catch (error: any) {
-    console.error('Payment error:', error);
-    // You might want to show this error to the user in a more user-friendly way
-    alert(error.message || 'An error occurred while processing your payment');
+    const { sessionId, url } = await response.json();
+    console.log("Checkout session created:", sessionId);
+    window.location.href = url;
+  } catch (error) {
+    console.error("Error creating checkout session:", error);
+    alert("Failed to process payment. Please try again.");
   }
 };
 
 export default function PricingPage() {
-  const [isLoading, setIsLoading] = useState<string | null>(null);
+  const [loading, setLoading] = useState<string | null>(null);
 
   const onSubscribe = async (priceId: string) => {
+    setLoading(priceId);
     try {
-      setIsLoading(priceId);
       await handleSubscribe(priceId);
-    } catch (error) {
-      console.error('Subscription error:', error);
     } finally {
-      setIsLoading(null);
+      setLoading(null);
     }
   };
 
@@ -106,8 +100,8 @@ export default function PricingPage() {
               </ul>
 
               <Link href="/payment?plan=monthly" className="w-full">
-                <Button className="w-full" onClick={() => onSubscribe('monthly')} disabled={isLoading === 'monthly'}>
-                  {isLoading === 'monthly' ? 'Processing...' : 'Subscribe Now'}
+                <Button className="w-full" onClick={() => onSubscribe('monthly')} disabled={loading === 'monthly'}>
+                  {loading === 'monthly' ? 'Processing...' : 'Subscribe Now'}
                 </Button>
               </Link>
             </div>
@@ -146,8 +140,8 @@ export default function PricingPage() {
               </ul>
 
               <Link href="/payment?plan=annual" className="w-full">
-                <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => onSubscribe('annual')} disabled={isLoading === 'annual'}>
-                  {isLoading === 'annual' ? 'Processing...' : 'Subscribe Now'}
+                <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => onSubscribe('annual')} disabled={loading === 'annual'}>
+                  {loading === 'annual' ? 'Processing...' : 'Subscribe Now'}
                 </Button>
               </Link>
             </div>
