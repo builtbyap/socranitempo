@@ -118,22 +118,44 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
   });
 
   try {
+    console.log('Request body:', req.body);
+    console.log('Request headers:', req.headers);
+
     const { priceId, userId } = req.body;
 
     if (!priceId) {
+      console.error('No priceId provided');
       throw new Error('Price ID is required');
     }
 
     if (!userId) {
+      console.error('No userId provided');
       throw new Error('User ID is required');
     }
 
     // Get the user's email from Firebase Auth
-    const userRecord = await admin.auth().getUser(userId);
-    const userEmail = userRecord.email;
+    let userEmail;
+    try {
+      const userRecord = await admin.auth().getUser(userId);
+      userEmail = userRecord.email;
+      console.log('User email retrieved:', userEmail);
+    } catch (error) {
+      console.error('Error getting user:', error);
+      throw new Error('Failed to get user information');
+    }
 
     if (!userEmail) {
+      console.error('No email found for user');
       throw new Error('User email not found');
+    }
+
+    // Validate the price ID
+    try {
+      const price = await stripe.prices.retrieve(priceId);
+      console.log('Price validated:', price.id);
+    } catch (error) {
+      console.error('Invalid price ID:', error);
+      throw new Error('Invalid price ID');
     }
 
     // Create a checkout session
@@ -151,7 +173,9 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
       customer_email: userEmail,
       metadata: {
         userId: userId
-      }
+      },
+      billing_address_collection: 'required',
+      allow_promotion_codes: true
     });
 
     console.log('Checkout session created:', session.id);
@@ -163,7 +187,8 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
   } catch (error: any) {
     console.error('Error creating checkout session:', error);
     res.status(500).json({
-      error: error.message || 'An error occurred while creating the checkout session'
+      error: error.message || 'An error occurred while creating the checkout session',
+      details: error.stack
     });
   }
 });

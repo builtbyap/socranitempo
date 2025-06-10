@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Check } from "lucide-react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase/auth";
+import { useState } from "react";
 
 const handleSubscribe = async (priceId: string) => {
   try {
@@ -10,6 +11,9 @@ const handleSubscribe = async (priceId: string) => {
     if (!user) {
       throw new Error('User must be logged in to subscribe');
     }
+
+    console.log('Creating checkout session for user:', user.uid);
+    console.log('Price ID:', priceId);
 
     const response = await fetch('https://us-central1-socrani-18328.cloudfunctions.net/createCheckoutSession', {
       method: 'POST',
@@ -25,24 +29,41 @@ const handleSubscribe = async (priceId: string) => {
       credentials: 'include'
     });
 
+    const data = await response.json();
+
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create checkout session');
+      console.error('Server error:', data);
+      throw new Error(data.error || 'Failed to create checkout session');
     }
 
-    const { url } = await response.json();
-    if (url) {
-      window.location.href = url;
-    } else {
+    if (!data.url) {
+      console.error('No URL in response:', data);
       throw new Error('No checkout URL received');
     }
+
+    console.log('Redirecting to checkout:', data.url);
+    window.location.href = data.url;
   } catch (error: any) {
     console.error('Payment error:', error);
-    // Handle error (show error message to user)
+    // You might want to show this error to the user in a more user-friendly way
+    alert(error.message || 'An error occurred while processing your payment');
   }
 };
 
 export default function PricingPage() {
+  const [isLoading, setIsLoading] = useState<string | null>(null);
+
+  const onSubscribe = async (priceId: string) => {
+    try {
+      setIsLoading(priceId);
+      await handleSubscribe(priceId);
+    } catch (error) {
+      console.error('Subscription error:', error);
+    } finally {
+      setIsLoading(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
       <Navbar />
@@ -85,7 +106,9 @@ export default function PricingPage() {
               </ul>
 
               <Link href="/payment?plan=monthly" className="w-full">
-                <Button className="w-full">Subscribe Now</Button>
+                <Button className="w-full" onClick={() => onSubscribe('monthly')} disabled={isLoading === 'monthly'}>
+                  {isLoading === 'monthly' ? 'Processing...' : 'Subscribe Now'}
+                </Button>
               </Link>
             </div>
 
@@ -123,8 +146,8 @@ export default function PricingPage() {
               </ul>
 
               <Link href="/payment?plan=annual" className="w-full">
-                <Button className="w-full bg-blue-600 hover:bg-blue-700">
-                  Subscribe Now
+                <Button className="w-full bg-blue-600 hover:bg-blue-700" onClick={() => onSubscribe('annual')} disabled={isLoading === 'annual'}>
+                  {isLoading === 'annual' ? 'Processing...' : 'Subscribe Now'}
                 </Button>
               </Link>
             </div>
