@@ -94,17 +94,20 @@ export const createCustomer = functions.https.onCall(async (data, context) => {
 export const createCheckoutSession = functions.https.onRequest(async (req, res) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Max-Age', '3600');
     res.status(204).send('');
     return;
   }
 
   // Set CORS headers for all responses
-  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Allow-Credentials', 'true');
 
   try {
     // Parse request body

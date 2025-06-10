@@ -18,17 +18,22 @@ const handleSubscribe = async (priceId: string) => {
     console.log("Creating checkout session for user:", user.uid);
     console.log("Price ID:", priceId);
 
+    // Get the ID token
+    const idToken = await user.getIdToken();
+
     const response = await fetch(
       "https://us-central1-socrani-18328.cloudfunctions.net/createCheckoutSession",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${idToken}`,
         },
         body: JSON.stringify({
           priceId,
           userId: user.uid,
         }),
+        credentials: "include",
       }
     );
 
