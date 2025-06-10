@@ -18,12 +18,6 @@ const handleSubscribe = async (priceId: string) => {
     console.log("Creating checkout session for user:", user.uid);
     console.log("Price ID:", priceId);
 
-    // Get a fresh ID token
-    const idToken = await user.getIdToken(true);
-    if (!idToken) {
-      throw new Error("Failed to get authentication token");
-    }
-
     // Validate price ID format
     if (!priceId.startsWith("price_")) {
       throw new Error("Invalid price ID format");
@@ -35,12 +29,10 @@ const handleSubscribe = async (priceId: string) => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${idToken}`,
         },
         body: JSON.stringify({
           priceId,
         }),
-        credentials: "include",
       }
     );
 

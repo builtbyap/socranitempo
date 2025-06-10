@@ -114,30 +114,9 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
     console.log("Request headers:", req.headers);
     console.log("Request body:", req.body);
 
-    // Verify Authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error("Missing or invalid Authorization header");
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    // Verify Firebase token
-    const idToken = authHeader.split('Bearer ')[1];
-    let decodedToken;
-    try {
-      decodedToken = await admin.auth().verifyIdToken(idToken);
-      console.log("Verified user:", decodedToken.uid);
-    } catch (error) {
-      console.error("Error verifying token:", error);
-      res.status(401).json({ error: "Invalid authentication token" });
-      return;
-    }
-
     // Parse request body
     const { priceId } = req.body;
-    const userId = decodedToken.uid; // Use the verified user ID from the token
-    console.log("Parsed request data:", { priceId, userId });
+    console.log("Price ID from request:", priceId);
 
     if (!priceId) {
       console.error("Missing priceId in request");
@@ -156,37 +135,6 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
       return;
     }
 
-    // Get user email from Firebase Auth
-    let userRecord;
-    try {
-      userRecord = await admin.auth().getUser(userId);
-      console.log("Retrieved user:", userRecord.email);
-    } catch (error) {
-      console.error("Error getting user:", error);
-      res.status(400).json({
-        error: "Invalid user ID",
-      });
-      return;
-    }
-
-    if (!userRecord.email) {
-      console.error("User has no email:", userId);
-      res.status(400).json({ error: "User email not found" });
-      return;
-    }
-
-    // Validate the price ID with Stripe
-    try {
-      const price = await stripe.prices.retrieve(priceId);
-      console.log("Validated price:", price.id);
-    } catch (error) {
-      console.error("Invalid price ID:", error);
-      res.status(400).json({
-        error: "Invalid price ID",
-      });
-      return;
-    }
-
     // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -199,10 +147,6 @@ export const createCheckoutSession = functions.https.onRequest(async (req, res) 
       mode: 'subscription',
       success_url: `${req.headers.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${req.headers.origin}/pricing`,
-      customer_email: userRecord.email,
-      metadata: {
-        userId: userId,
-      },
     });
 
     console.log('Created Stripe session:', session.id);
