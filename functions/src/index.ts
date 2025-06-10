@@ -92,91 +92,80 @@ export const createCustomer = functions.https.onCall(async (data, context) => {
 });
 
 export const createCheckoutSession = functions.https.onRequest(async (req, res) => {
-  return corsHandler(req, res, async () => {
-    try {
-      if (req.method !== 'POST') {
-        res.status(405).json({ error: 'Method not allowed' });
-        return;
-      }
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Max-Age', '3600');
+    res.status(204).send('');
+    return;
+  }
 
-      // Log the entire request for debugging
-      console.log('Request headers:', req.headers);
-      console.log('Request body:', req.body);
-      console.log('Request query:', req.query);
+  // Set CORS headers for all responses
+  res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.set('Access-Control-Allow-Credentials', 'true');
 
-      // Extract data from the request
-      const { data } = req.body;
-      if (!data) {
-        console.error('No data provided in request body');
-        res.status(400).json({ 
-          error: 'Request data is required',
-          data: null 
-        });
-        return;
-      }
-
-      const { priceId, successUrl, cancelUrl } = data;
-
-      if (!priceId) {
-        console.error('No priceId provided in request data');
-        res.status(400).json({ 
-          error: 'Price ID is required',
-          data: null 
-        });
-        return;
-      }
-
-      // Validate the price ID with Stripe
-      try {
-        const price = await stripe.prices.retrieve(priceId);
-        console.log('Validated price:', price);
-      } catch (error) {
-        console.error('Invalid price ID:', error);
-        res.status(400).json({ 
-          error: 'Invalid price ID',
-          details: error instanceof Error ? error.message : 'Unknown error',
-          data: null 
-        });
-        return;
-      }
-
-      // Get the origin from the request headers
-      const origin = req.headers.origin || 'https://socrani.com';
-      
-      // Create the checkout session
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        line_items: [
-          {
-            price: priceId,
-            quantity: 1,
-          },
-        ],
-        mode: 'subscription',
-        success_url: successUrl || `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: cancelUrl || `${origin}/cancel`,
-        billing_address_collection: 'required',
-        customer_email: data.customerEmail,
-      });
-
-      console.log('Created checkout session:', session.id);
-      
-      // Format response for httpsCallable
-      res.status(200).json({ 
-        data: { 
-          sessionId: session.id 
-        } 
-      });
-    } catch (error) {
-      console.error('Error creating checkout session:', error);
-      res.status(500).json({ 
-        error: 'Failed to create checkout session',
-        details: error instanceof Error ? error.message : 'Unknown error',
-        code: error instanceof Error ? error.name : 'Unknown',
-        data: null 
-      });
-    }
+  // Wrap the CORS handler in a promise
+  await new Promise((resolve, reject) => {
+    corsHandler(req, res, (err) => {
+      if (err) reject(err);
+      resolve(true);
+    });
   });
+
+  try {
+    const { priceId, userId } = req.body;
+
+    if (!priceId) {
+      throw new Error('Price ID is required');
+    }
+
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+
+    // Get the user's email from Firebase Auth
+    const userRecord = await admin.auth().getUser(userId);
+    const userEmail = userRecord.email;
+
+    if (!userEmail) {
+      throw new Error('User email not found');
+    }
+
+    // Create a checkout session
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
+      success_url: `${req.headers.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${req.headers.origin}/pricing`,
+      customer_email: userEmail,
+      metadata: {
+        userId: userId
+      }
+    });
+
+    console.log('Checkout session created:', session.id);
+
+    res.status(200).json({
+      sessionId: session.id,
+      url: session.url
+    });
+  } catch (error: any) {
+    console.error('Error creating checkout session:', error);
+    res.status(500).json({
+      error: error.message || 'An error occurred while creating the checkout session'
+    });
+  }
 });
 
 export const getSubscriptionStatus = functions.https.onRequest((req, res) => {

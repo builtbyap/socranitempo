@@ -2,6 +2,45 @@ import Navbar from "@/components/navbar";
 import { Button } from "@/components/ui/button";
 import { Check } from "lucide-react";
 import Link from "next/link";
+import { auth } from "@/lib/firebase/auth";
+
+const handleSubscribe = async (priceId: string) => {
+  try {
+    const user = auth.currentUser;
+    if (!user) {
+      throw new Error('User must be logged in to subscribe');
+    }
+
+    const response = await fetch('https://us-central1-socrani-18328.cloudfunctions.net/createCheckoutSession', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        priceId,
+        userId: user.uid
+      }),
+      mode: 'cors',
+      credentials: 'include'
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to create checkout session');
+    }
+
+    const { url } = await response.json();
+    if (url) {
+      window.location.href = url;
+    } else {
+      throw new Error('No checkout URL received');
+    }
+  } catch (error: any) {
+    console.error('Payment error:', error);
+    // Handle error (show error message to user)
+  }
+};
 
 export default function PricingPage() {
   return (
