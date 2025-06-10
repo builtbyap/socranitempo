@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Check } from "lucide-react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase/auth";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { useState } from "react";
 
 const handleSubscribe = async (priceId: string) => {
@@ -23,33 +24,21 @@ const handleSubscribe = async (priceId: string) => {
       throw new Error("Invalid price ID format");
     }
 
-    const response = await fetch(
-      "https://us-central1-socrani-18328.cloudfunctions.net/createCheckoutSession",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          priceId,
-        }),
-      }
-    );
+    // Initialize Firebase Functions
+    const functions = getFunctions();
+    const createCheckoutSession = httpsCallable(functions, 'createCheckoutSession');
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error("Server error:", errorData);
-      throw new Error(errorData.error || "Failed to create checkout session");
-    }
+    // Call the function
+    const result = await createCheckoutSession({ priceId });
+    const { url } = result.data as { url: string };
 
-    const data = await response.json();
-    if (!data.url) {
-      console.error("No URL in response:", data);
+    if (!url) {
+      console.error("No URL in response:", result.data);
       throw new Error("No checkout URL received");
     }
 
-    console.log("Redirecting to checkout:", data.url);
-    window.location.href = data.url;
+    console.log("Redirecting to checkout:", url);
+    window.location.href = url;
   } catch (error) {
     console.error("Payment error:", error);
     alert(error instanceof Error ? error.message : "An error occurred while processing your payment");
