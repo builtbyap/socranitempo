@@ -16,9 +16,10 @@ import Link from "next/link";
 import { createCheckoutSession, getCustomerPortalUrl, getSubscriptionStatus, auth, db, functions } from "@/lib/firebase";
 import { getStripe } from "@/lib/stripe";
 import { DocumentSnapshot } from "firebase/firestore";
-import { collection, doc, addDoc, onSnapshot, getDoc, setDoc } from "firebase/firestore";
+import { collection, doc, addDoc, onSnapshot, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { loadStripe } from "@stripe/stripe-js";
+import { toast } from "react-hot-toast";
 
 // Initialize Stripe
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
@@ -143,26 +144,19 @@ export default function PaymentPage() {
 
   const handleSubscribe = async (priceId: string) => {
     try {
-      setProcessingPayment(true);
-      setError(null);
-
       if (!user) {
-        router.push("/sign-in");
+        toast.error('Please sign in to subscribe');
         return;
       }
 
-      // Get or create Stripe customer
-      const userRef = doc(db, 'users', user.uid);
-      const userDoc = await getDoc(userRef);
-      let customerId = userDoc.data()?.stripeCustomerId;
-
-      if (!customerId) {
-        // Create a new customer in Stripe
-        const stripe = await stripePromise;
-        if (!stripe) {
-          throw new Error('Failed to initialize Stripe');
-        }
-
+      // Check if customer already exists
+      const customerRef = doc(db, 'customers', user.uid);
+      const customerDoc = await getDoc(customerRef);
+      
+      let customerId;
+      
+      if (!customerDoc.exists()) {
+        // Create customer in Stripe
         const response = await fetch('/api/create-customer', {
           method: 'POST',
           headers: {
@@ -174,15 +168,22 @@ export default function PaymentPage() {
           }),
         });
 
+        if (!response.ok) {
+          throw new Error('Failed to create customer');
+        }
+
         const { customerId: newCustomerId } = await response.json();
         customerId = newCustomerId;
 
-        // Save customer ID to Firestore
-        await setDoc(userRef, {
+        // Store customer data in Firestore
+        await setDoc(customerRef, {
+          userId: user.uid,
           email: user.email,
           stripeCustomerId: customerId,
-          createdAt: new Date().toISOString(),
-        }, { merge: true });
+          createdAt: serverTimestamp(),
+        });
+      } else {
+        customerId = customerDoc.data().stripeCustomerId;
       }
 
       // Create checkout session
@@ -194,23 +195,24 @@ export default function PaymentPage() {
         body: JSON.stringify({
           priceId,
           customerId,
-          successUrl: `${window.location.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancelUrl: `${window.location.origin}/pricing`,
+          userId: user.uid,
+          successUrl: `${window.location.origin}/payment/success`,
+          cancelUrl: `${window.location.origin}/payment`,
         }),
       });
 
-      const { url, error } = await response.json();
-      
-      if (error) {
-        throw new Error(error);
+      if (!response.ok) {
+        throw new Error('Failed to create checkout session');
       }
 
+      const { sessionId } = await response.json();
+      
       // Redirect to Stripe Checkout
-      window.location.assign(url);
-    } catch (err: any) {
-      console.error("Payment error:", err);
-      setError(err.message || "An error occurred during payment processing");
-      setProcessingPayment(false);
+      const stripe = await loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+      await stripe?.redirectToCheckout({ sessionId });
+    } catch (error) {
+      console.error('Payment error:', error);
+      toast.error('Failed to process payment. Please try again.');
     }
   };
 

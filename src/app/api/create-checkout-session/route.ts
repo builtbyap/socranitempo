@@ -3,6 +3,8 @@ import { createCheckoutSession } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
 import { corsMiddleware, corsOptionsMiddleware } from "@/lib/cors";
 import Stripe from 'stripe';
+import { db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2025-02-24.acacia',
@@ -16,27 +18,29 @@ export async function POST(req: NextRequest) {
       return corsResponse;
     }
 
-    const { priceId, customerId, successUrl, cancelUrl } = await req.json();
+    const { priceId, customerId, userId, successUrl, cancelUrl } = await req.json();
 
-    if (!priceId || !customerId) {
+    if (!priceId || !customerId || !userId) {
       return NextResponse.json(
-        { error: 'Price ID and customer ID are required' },
+        { error: 'Price ID, customer ID, and user ID are required' },
         { status: 400 }
       );
     }
 
-    // Get the current user
-    const user = auth.currentUser;
-    if (!user) {
+    // Verify customer exists in Firestore
+    const customerRef = doc(db, 'customers', userId);
+    const customerDoc = await getDoc(customerRef);
+
+    if (!customerDoc.exists()) {
       return NextResponse.json(
-        { error: "User must be authenticated" },
-        { status: 401 }
+        { error: 'Customer not found' },
+        { status: 404 }
       );
     }
 
-    // Create a checkout session
+    // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
+      customer: customerId,
       payment_method_types: ['card'],
       line_items: [
         {
@@ -44,13 +48,15 @@ export async function POST(req: NextRequest) {
           quantity: 1,
         },
       ],
-      success_url: successUrl || `${req.headers.get('origin')}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: cancelUrl || `${req.headers.get('origin')}/pricing`,
-      customer: customerId,
-      allow_promotion_codes: true,
+      mode: 'subscription',
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        userId,
+      },
     });
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({ sessionId: session.id });
   } catch (error: any) {
     console.error('Error creating checkout session:', error);
     return NextResponse.json(
