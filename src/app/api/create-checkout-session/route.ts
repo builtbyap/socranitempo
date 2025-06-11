@@ -4,7 +4,8 @@ import { auth } from "@/lib/firebase";
 import { corsMiddleware, corsOptionsMiddleware } from "@/lib/cors";
 import Stripe from 'stripe';
 import { db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { serverTimestamp } from 'firebase/firestore';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2025-02-24.acacia',
@@ -38,6 +39,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Get price details from Stripe
+    const price = await stripe.prices.retrieve(priceId);
+    if (!price) {
+      return NextResponse.json(
+        { error: 'Invalid price ID' },
+        { status: 400 }
+      );
+    }
+
     // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
@@ -53,14 +63,35 @@ export async function POST(req: NextRequest) {
       cancel_url: cancelUrl,
       metadata: {
         userId,
+        priceId,
       },
+      subscription_data: {
+        metadata: {
+          userId,
+        },
+      },
+    });
+
+    // Update customer document with pending subscription
+    await updateDoc(customerRef, {
+      pendingSubscriptionId: session.subscription,
+      lastCheckoutSessionId: session.id,
+      updatedAt: serverTimestamp(),
     });
 
     return NextResponse.json({ sessionId: session.id });
   } catch (error: any) {
     console.error('Error creating checkout session:', error);
+    
+    if (error instanceof Stripe.errors.StripeError) {
+      return NextResponse.json(
+        { error: `Stripe error: ${error.message}` },
+        { status: error.statusCode || 500 }
+      );
+    }
+    
     return NextResponse.json(
-      { error: error.message || 'Failed to create checkout session' },
+      { error: 'Failed to create checkout session' },
       { status: 500 }
     );
   }
