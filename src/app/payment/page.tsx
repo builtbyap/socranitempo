@@ -13,13 +13,25 @@ import {
 } from "@/components/ui/card";
 import { CheckIcon, InfoIcon, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { createCheckoutSession, getCustomerPortalUrl, getSubscriptionStatus, auth } from "@/lib/firebase";
+import { createCheckoutSession, getCustomerPortalUrl, getSubscriptionStatus, auth, db, functions } from "@/lib/firebase";
 import { getStripe } from "@/lib/stripe";
+import { DocumentSnapshot } from "firebase/firestore";
+import { collection, doc, addDoc, onSnapshot, getDoc, setDoc } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
+import { loadStripe } from "@stripe/stripe-js";
+
+// Initialize Stripe
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+
+interface CheckoutSessionResponse {
+  url: string;
+  sessionId: string;
+}
 
 // Define subscription plans
 const SUBSCRIPTION_PLANS = {
   monthly: {
-    id: "price_1RMyDuCyTrsNmVMYSACvTMhw", // $15 monthly
+    id: "price_1RYuxlCyTrsNmVMYqdUnnIYw", // $15 monthly
     name: "Monthly",
     price: 15,
     description: "Perfect for short-term needs",
@@ -30,7 +42,7 @@ const SUBSCRIPTION_PLANS = {
     ],
   },
   annual: {
-    id: "price_1RNNsvCyTrsNmVMYkaaTV7I7", // $50 annual
+    id: "price_1RYuy0CyTrsNmVMY9sKhvHao", // $50 annual
     name: "Annual",
     price: 50,
     description: "Best value for long-term use",
@@ -139,32 +151,65 @@ export default function PaymentPage() {
         return;
       }
 
-      // Get Stripe instance first
-      const stripe = await getStripe();
-      if (!stripe) {
-        setError('Unable to initialize payment system. Please try again later or contact support.');
-        console.error('Stripe initialization failed. Check if NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is properly set in .env.local');
-        return;
+      // Get or create Stripe customer
+      const userRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userRef);
+      let customerId = userDoc.data()?.stripeCustomerId;
+
+      if (!customerId) {
+        // Create a new customer in Stripe
+        const stripe = await stripePromise;
+        if (!stripe) {
+          throw new Error('Failed to initialize Stripe');
+        }
+
+        const response = await fetch('/api/create-customer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: user.email,
+            userId: user.uid,
+          }),
+        });
+
+        const { customerId: newCustomerId } = await response.json();
+        customerId = newCustomerId;
+
+        // Save customer ID to Firestore
+        await setDoc(userRef, {
+          email: user.email,
+          stripeCustomerId: customerId,
+          createdAt: new Date().toISOString(),
+        }, { merge: true });
       }
 
-      const { success, sessionId, error } = await createCheckoutSession(priceId);
+      // Create checkout session
+      const response = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          priceId,
+          customerId,
+          successUrl: `${window.location.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancelUrl: `${window.location.origin}/pricing`,
+        }),
+      });
 
-      if (!success || !sessionId) {
-        throw new Error(error?.toString() || "Failed to create checkout session");
+      const { url, error } = await response.json();
+      
+      if (error) {
+        throw new Error(error);
       }
 
       // Redirect to Stripe Checkout
-      const { error: stripeError } = await stripe.redirectToCheckout({
-        sessionId
-      });
-
-      if (stripeError) {
-        throw new Error(stripeError.message);
-      }
+      window.location.assign(url);
     } catch (err: any) {
       console.error("Payment error:", err);
       setError(err.message || "An error occurred during payment processing");
-    } finally {
       setProcessingPayment(false);
     }
   };
