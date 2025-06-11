@@ -143,76 +143,31 @@ export default function PaymentPage() {
     : null;
 
   const handleSubscribe = async (priceId: string) => {
+    if (!user) {
+      toast.error('Please sign in to subscribe');
+      return;
+    }
+
     try {
-      if (!user) {
-        toast.error('Please sign in to subscribe');
-        return;
-      }
-
-      // Check if customer already exists
-      const customerRef = doc(db, 'customers', user.uid);
-      const customerDoc = await getDoc(customerRef);
-      
-      let customerId;
-      
-      if (!customerDoc.exists()) {
-        // Create customer in Stripe
-        const response = await fetch('/api/create-customer', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            email: user.email,
-            userId: user.uid,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to create customer');
-        }
-
-        const { customerId: newCustomerId } = await response.json();
-        customerId = newCustomerId;
-
-        // Store customer data in Firestore
-        await setDoc(customerRef, {
-          userId: user.uid,
-          email: user.email,
-          stripeCustomerId: customerId,
-          createdAt: serverTimestamp(),
-        });
-      } else {
-        customerId = customerDoc.data().stripeCustomerId;
-      }
-
-      // Create checkout session
-      const response = await fetch('/api/create-checkout-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          priceId,
-          customerId,
-          userId: user.uid,
-          successUrl: `${window.location.origin}/payment/success`,
-          cancelUrl: `${window.location.origin}/payment`,
-        }),
+      setProcessingPayment(true);
+      // Use the Stripe Firebase Extension instead of the frontend API route
+      const response = await (createCheckoutSession as any)({
+        priceId,
+        customerId: user.uid,
+        successUrl: `${window.location.origin}/payment/success`,
+        cancelUrl: `${window.location.origin}/payment`,
       });
 
-      if (!response.ok) {
+      if (response.sessionId) {
+        window.location.href = response.sessionId;
+      } else {
         throw new Error('Failed to create checkout session');
       }
-
-      const { sessionId } = await response.json();
-      
-      // Redirect to Stripe Checkout
-      const stripe = await loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
-      await stripe?.redirectToCheckout({ sessionId });
     } catch (error) {
       console.error('Payment error:', error);
-      toast.error('Failed to process payment. Please try again.');
+      toast.error('Failed to start checkout process');
+    } finally {
+      setProcessingPayment(false);
     }
   };
 
