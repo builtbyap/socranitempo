@@ -133,6 +133,33 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
       );
     }
 
+    // Get or create Stripe customer
+    const usersRef = admin.firestore().collection('users');
+    const userDoc = await usersRef.doc(context.auth.uid).get();
+    let customerId;
+
+    if (userDoc.exists && userDoc.data()?.stripeCustomerId) {
+      customerId = userDoc.data()?.stripeCustomerId;
+      console.log("Found existing Stripe customer:", customerId);
+    } else {
+      // Create new Stripe customer
+      const customer = await stripe.customers.create({
+        email: user.email,
+        metadata: {
+          firebaseUID: context.auth.uid
+        }
+      });
+      customerId = customer.id;
+      console.log("Created new Stripe customer:", customerId);
+
+      // Save Stripe customer ID to Firestore
+      await usersRef.doc(context.auth.uid).set({
+        stripeCustomerId: customerId,
+        email: user.email,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
+
     // Verify the price exists in Stripe
     try {
       const price = await stripe.prices.retrieve(priceId);
@@ -158,7 +185,7 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
         ],
         success_url: `${functions.config().app.url}/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${functions.config().app.url}/pricing`,
-        customer_email: user.email,
+        customer: customerId,
         metadata: {
           userId: context.auth.uid,
         },
