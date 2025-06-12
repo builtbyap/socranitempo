@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleSuccessfulPayment = exports.getSubscriptionStatus = exports.createCheckoutSession = exports.createCustomer = exports.onCreateUser = void 0;
+exports.handleSuccessfulPayment = exports.getSubscriptionStatus = exports.createCheckoutSessionHttp = exports.createCheckoutSession = exports.createCustomer = exports.onCreateUser = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const cors = require("cors");
@@ -10,12 +10,23 @@ const corsHandler = cors({
     origin: ['https://socrani.com', 'http://localhost:3000', 'https://socranitempo.vercel.app'],
     methods: ['GET', 'POST', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept']
 });
 // Initialize Stripe with Firebase config
 const stripe = new stripe_1.default(functions.config().stripe.secret_key, {
     apiVersion: '2023-10-16',
 });
+// Helper function to handle CORS
+const handleCors = (req, res) => {
+    return new Promise((resolve, reject) => {
+        corsHandler(req, res, (result) => {
+            if (result instanceof Error) {
+                return reject(result);
+            }
+            return resolve(result);
+        });
+    });
+};
 // Function to create a customer record when a new user signs up
 exports.onCreateUser = functions.auth.user().onCreate(async (user) => {
     try {
@@ -147,15 +158,6 @@ exports.createCheckoutSession = functions.https.onCall(async (data, context) => 
                 throw new functions.https.HttpsError("internal", "Failed to create Stripe customer", error);
             }
         }
-        // Verify the price exists in Stripe
-        try {
-            const price = await stripe.prices.retrieve(priceId);
-            console.log("Retrieved price:", price);
-        }
-        catch (error) {
-            console.error("Error retrieving price:", error);
-            throw new functions.https.HttpsError("invalid-argument", "Invalid price ID");
-        }
         // Create checkout session
         try {
             const session = await stripe.checkout.sessions.create({
@@ -188,6 +190,116 @@ exports.createCheckoutSession = functions.https.onCall(async (data, context) => 
     catch (error) {
         console.error("Unexpected error:", error);
         throw new functions.https.HttpsError("internal", "An unexpected error occurred", error);
+    }
+});
+// Add a new HTTP function for direct API calls
+exports.createCheckoutSessionHttp = functions.https.onRequest(async (req, res) => {
+    var _a, _b;
+    try {
+        // Handle CORS
+        await handleCors(req, res);
+        // Only allow POST requests
+        if (req.method !== 'POST') {
+            res.status(405).send('Method Not Allowed');
+            return;
+        }
+        // Get the Firebase ID token from the Authorization header
+        const authHeader = req.headers.authorization;
+        if (!(authHeader === null || authHeader === void 0 ? void 0 : authHeader.startsWith('Bearer '))) {
+            res.status(401).send('Unauthorized');
+            return;
+        }
+        const idToken = authHeader.split('Bearer ')[1];
+        let decodedToken;
+        try {
+            decodedToken = await admin.auth().verifyIdToken(idToken);
+        }
+        catch (error) {
+            console.error('Error verifying ID token:', error);
+            res.status(401).send('Invalid ID token');
+            return;
+        }
+        const { priceId } = req.body;
+        if (!priceId) {
+            res.status(400).send('Price ID is required');
+            return;
+        }
+        // Get user email
+        const user = await admin.auth().getUser(decodedToken.uid);
+        if (!user.email) {
+            res.status(400).send('User must have an email address');
+            return;
+        }
+        // Get or create Stripe customer
+        const customersRef = admin.firestore().collection('customers');
+        const customerDoc = await customersRef.doc(decodedToken.uid).get();
+        let customerId;
+        if (customerDoc.exists && ((_a = customerDoc.data()) === null || _a === void 0 ? void 0 : _a.stripeCustomerId)) {
+            customerId = (_b = customerDoc.data()) === null || _b === void 0 ? void 0 : _b.stripeCustomerId;
+            console.log("Found existing Stripe customer:", customerId);
+        }
+        else {
+            try {
+                // Create new Stripe customer
+                const customer = await stripe.customers.create({
+                    email: user.email,
+                    metadata: {
+                        firebaseUID: decodedToken.uid
+                    }
+                });
+                customerId = customer.id;
+                console.log("Created new Stripe customer:", customerId);
+                // Create customer portal session
+                const portalSession = await stripe.billingPortal.sessions.create({
+                    customer: customerId,
+                    return_url: `${functions.config().app.url}/dashboard`
+                });
+                // Save Stripe customer ID and portal link to Firestore
+                await customersRef.doc(decodedToken.uid).set({
+                    stripeCustomerId: customerId,
+                    stripeCustomerLink: portalSession.url,
+                    email: user.email,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            }
+            catch (error) {
+                console.error("Error creating Stripe customer:", error);
+                res.status(500).send('Failed to create Stripe customer');
+                return;
+            }
+        }
+        // Create checkout session
+        try {
+            const session = await stripe.checkout.sessions.create({
+                mode: "subscription",
+                payment_method_types: ["card"],
+                line_items: [
+                    {
+                        price: priceId,
+                        quantity: 1,
+                    },
+                ],
+                success_url: `${functions.config().app.url}/success?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${functions.config().app.url}/pricing`,
+                customer: customerId,
+                metadata: {
+                    userId: decodedToken.uid,
+                },
+            });
+            res.status(200).json({
+                sessionId: session.id,
+                url: session.url,
+            });
+        }
+        catch (error) {
+            console.error("Error creating checkout session:", error);
+            res.status(500).send('Failed to create checkout session');
+        }
+    }
+    catch (error) {
+        console.error("Unexpected error:", error);
+        res.status(500).send('An unexpected error occurred');
     }
 });
 exports.getSubscriptionStatus = functions.https.onRequest((req, res) => {
@@ -254,7 +366,7 @@ exports.getSubscriptionStatus = functions.https.onRequest((req, res) => {
     });
 });
 exports.handleSuccessfulPayment = functions.https.onRequest(async (req, res) => {
-    var _a;
+    var _a, _b;
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
         res.set('Access-Control-Allow-Origin', req.headers.origin || '*');
@@ -279,6 +391,16 @@ exports.handleSuccessfulPayment = functions.https.onRequest(async (req, res) => 
         });
     });
     try {
+        // Check if Stripe secret key is configured
+        const stripeSecretKey = (_a = functions.config().stripe) === null || _a === void 0 ? void 0 : _a.secret_key;
+        if (!stripeSecretKey) {
+            console.error("Stripe secret key is not configured");
+            throw new Error("Stripe configuration is missing");
+        }
+        // Initialize Stripe with the secret key
+        const stripe = new stripe_1.default(stripeSecretKey, {
+            apiVersion: '2023-10-16',
+        });
         // Get the session ID from the request body
         const { sessionId } = req.body;
         if (!sessionId) {
@@ -330,7 +452,7 @@ exports.handleSuccessfulPayment = functions.https.onRequest(async (req, res) => 
             tier: tier
         });
         // Get the user ID from the session metadata
-        const userId = (_a = session.metadata) === null || _a === void 0 ? void 0 : _a.userId;
+        const userId = (_b = session.metadata) === null || _b === void 0 ? void 0 : _b.userId;
         if (!userId) {
             throw new Error("No user ID found in session metadata");
         }
