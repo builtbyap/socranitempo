@@ -281,9 +281,9 @@ export const createCheckoutSessionHttp = functions.https.onRequest(async (req, r
       return;
     }
 
-    const { priceId } = req.body;
-    if (!priceId) {
-      res.status(400).send('Price ID is required');
+    const { priceId, userId } = req.body;
+    if (!priceId || !userId) {
+      res.status(400).send('Price ID and userId are required');
       return;
     }
 
@@ -350,7 +350,7 @@ export const createCheckoutSessionHttp = functions.https.onRequest(async (req, r
         cancel_url: `${functions.config().app.url}/pricing`,
         customer: customerId,
         metadata: {
-          userId: decodedToken.uid,
+          userId: userId,
         },
       });
 
