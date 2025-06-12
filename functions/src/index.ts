@@ -481,7 +481,7 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
     });
 
     // Get the session ID from the request body
-    const { sessionId } = req.body;
+    const { sessionId, userId: requestUserId } = req.body;
     if (!sessionId) {
       throw new Error("No session ID provided");
     }
@@ -542,10 +542,10 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       tier: tier
     });
 
-    // Get the user ID from the session metadata
-    const userId = session.metadata?.userId;
+    // Get the user ID from either the request body or session metadata
+    const userId = requestUserId || session.metadata?.userId;
     if (!userId) {
-      throw new Error("No user ID found in session metadata");
+      throw new Error("No user ID found in request or session metadata");
     }
 
     // Get the user's email from Firebase Auth

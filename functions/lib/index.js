@@ -219,9 +219,9 @@ exports.createCheckoutSessionHttp = functions.https.onRequest(async (req, res) =
             res.status(401).send('Invalid ID token');
             return;
         }
-        const { priceId } = req.body;
-        if (!priceId) {
-            res.status(400).send('Price ID is required');
+        const { priceId, userId } = req.body;
+        if (!priceId || !userId) {
+            res.status(400).send('Price ID and userId are required');
             return;
         }
         // Get user email
@@ -284,7 +284,7 @@ exports.createCheckoutSessionHttp = functions.https.onRequest(async (req, res) =
                 cancel_url: `${functions.config().app.url}/pricing`,
                 customer: customerId,
                 metadata: {
-                    userId: decodedToken.uid,
+                    userId: userId,
                 },
             });
             res.status(200).json({

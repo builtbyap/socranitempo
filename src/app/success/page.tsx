@@ -79,7 +79,10 @@ function SuccessContent() {
             'Content-Type': 'application/json',
             'Accept': 'application/json'
           },
-          body: JSON.stringify({ sessionId }),
+          body: JSON.stringify({ 
+            sessionId,
+            userId: user.uid 
+          }),
           mode: 'cors',
           credentials: 'include'
         });
