@@ -159,7 +159,7 @@ export default function PaymentPage() {
         collection(db, "customers", user.uid, "checkout_sessions"),
         {
           price: priceId,
-          success_url: window.location.origin + "/success",
+          success_url: window.location.origin + "/success?session_id={CHECKOUT_SESSION_ID}",
           cancel_url: window.location.origin + "/cancel",
         }
       );
