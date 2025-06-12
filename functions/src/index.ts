@@ -101,6 +101,26 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
       );
     }
 
+    // Check if Stripe secret key is configured
+    const stripeSecretKey = functions.config().stripe?.secret_key;
+    if (!stripeSecretKey) {
+      console.error("Stripe secret key is not configured");
+      throw new functions.https.HttpsError(
+        "internal",
+        "Stripe configuration is missing"
+      );
+    }
+
+    // Check if app URL is configured
+    const appUrl = functions.config().app?.url;
+    if (!appUrl) {
+      console.error("App URL is not configured");
+      throw new functions.https.HttpsError(
+        "internal",
+        "App URL configuration is missing"
+      );
+    }
+
     const { priceId } = data;
     console.log("Price ID:", priceId);
 
@@ -142,23 +162,32 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
       customerId = customerDoc.data()?.stripeCustomerId;
       console.log("Found existing Stripe customer:", customerId);
     } else {
-      // Create new Stripe customer
-      const customer = await stripe.customers.create({
-        email: user.email,
-        metadata: {
-          firebaseUID: context.auth.uid
-        }
-      });
-      customerId = customer.id;
-      console.log("Created new Stripe customer:", customerId);
+      try {
+        // Create new Stripe customer
+        const customer = await stripe.customers.create({
+          email: user.email,
+          metadata: {
+            firebaseUID: context.auth.uid
+          }
+        });
+        customerId = customer.id;
+        console.log("Created new Stripe customer:", customerId);
 
-      // Save Stripe customer ID to Firestore
-      await customersRef.doc(context.auth.uid).set({
-        stripeCustomerId: customerId,
-        email: user.email,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+        // Save Stripe customer ID to Firestore
+        await customersRef.doc(context.auth.uid).set({
+          stripeCustomerId: customerId,
+          email: user.email,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } catch (error) {
+        console.error("Error creating Stripe customer:", error);
+        throw new functions.https.HttpsError(
+          "internal",
+          "Failed to create Stripe customer",
+          error
+        );
+      }
     }
 
     // Verify the price exists in Stripe
@@ -184,8 +213,8 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
             quantity: 1,
           },
         ],
-        success_url: `${functions.config().app.url}/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${functions.config().app.url}/pricing`,
+        success_url: `${appUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appUrl}/pricing`,
         customer: customerId,
         metadata: {
           userId: context.auth.uid,
