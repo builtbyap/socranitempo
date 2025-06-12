@@ -134,12 +134,12 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
     }
 
     // Get or create Stripe customer
-    const usersRef = admin.firestore().collection('users');
-    const userDoc = await usersRef.doc(context.auth.uid).get();
+    const customersRef = admin.firestore().collection('customers');
+    const customerDoc = await customersRef.doc(context.auth.uid).get();
     let customerId;
 
-    if (userDoc.exists && userDoc.data()?.stripeCustomerId) {
-      customerId = userDoc.data()?.stripeCustomerId;
+    if (customerDoc.exists && customerDoc.data()?.stripeCustomerId) {
+      customerId = customerDoc.data()?.stripeCustomerId;
       console.log("Found existing Stripe customer:", customerId);
     } else {
       // Create new Stripe customer
@@ -153,10 +153,11 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
       console.log("Created new Stripe customer:", customerId);
 
       // Save Stripe customer ID to Firestore
-      await usersRef.doc(context.auth.uid).set({
+      await customersRef.doc(context.auth.uid).set({
         stripeCustomerId: customerId,
         email: user.email,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     }
 

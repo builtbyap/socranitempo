@@ -158,8 +158,11 @@ export default function PaymentPage() {
         cancelUrl: `${window.location.origin}/payment`,
       });
 
-      if (response.sessionId) {
-        window.location.href = response.sessionId;
+      if (response?.url) {
+        window.location.href = response.url;
+      } else if (response?.sessionId) {
+        const stripe = await loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+        await stripe?.redirectToCheckout({ sessionId: response.sessionId });
       } else {
         throw new Error('Failed to create checkout session');
       }
