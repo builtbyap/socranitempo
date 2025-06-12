@@ -173,9 +173,16 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
         customerId = customer.id;
         console.log("Created new Stripe customer:", customerId);
 
-        // Save Stripe customer ID to Firestore
+        // Create customer portal session
+        const portalSession = await stripe.billingPortal.sessions.create({
+          customer: customerId,
+          return_url: `${appUrl}/dashboard`
+        });
+
+        // Save Stripe customer ID and portal link to Firestore
         await customersRef.doc(context.auth.uid).set({
           stripeCustomerId: customerId,
+          stripeCustomerLink: portalSession.url,
           email: user.email,
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
