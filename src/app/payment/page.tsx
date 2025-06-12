@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { CheckIcon, InfoIcon, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { createCheckoutSession, getCustomerPortalUrl, getSubscriptionStatus, auth, db, functions } from "@/lib/firebase";
+import { getCustomerPortalUrl, getSubscriptionStatus, auth, db, functions } from "@/lib/firebase";
 import { getStripe } from "@/lib/stripe";
 import { DocumentSnapshot } from "firebase/firestore";
 import { collection, doc, addDoc, onSnapshot, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
