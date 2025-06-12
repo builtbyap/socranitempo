@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createCheckoutSession } from "@/lib/firebase";
 import { auth } from "@/lib/firebase";
 import { corsMiddleware, corsOptionsMiddleware } from "@/lib/cors";
 import Stripe from 'stripe';
@@ -8,7 +7,7 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { serverTimestamp } from 'firebase/firestore';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
+  apiVersion: '2023-10-16',
 });
 
 export async function POST(req: NextRequest) {
