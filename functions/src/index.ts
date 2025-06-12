@@ -468,6 +468,18 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
   });
 
   try {
+    // Check if Stripe secret key is configured
+    const stripeSecretKey = functions.config().stripe?.secret_key;
+    if (!stripeSecretKey) {
+      console.error("Stripe secret key is not configured");
+      throw new Error("Stripe configuration is missing");
+    }
+
+    // Initialize Stripe with the secret key
+    const stripe = new Stripe(stripeSecretKey, {
+      apiVersion: '2023-10-16',
+    });
+
     // Get the session ID from the request body
     const { sessionId } = req.body;
     if (!sessionId) {
