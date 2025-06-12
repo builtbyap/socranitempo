@@ -264,61 +264,6 @@ export const getSubscriptionStatus = async (userId: string) => {
   }
 };
 
-// Function to create a Stripe checkout session
-export const createCheckoutSession = async (priceId: string) => {
-  try {
-    if (!auth.currentUser) {
-      console.error('No authenticated user found');
-      return { success: false, error: 'User must be authenticated' };
-    }
-
-    console.log('Creating checkout session for price:', priceId);
-    
-    // Get the current user's ID token
-    const idToken = await auth.currentUser.getIdToken();
-    
-    const createCheckoutSessionFunction = httpsCallable<{ 
-      priceId: string;
-      successUrl?: string;
-      cancelUrl?: string;
-      customerEmail?: string;
-    }, { sessionId: string }>(
-      functions,
-      'createCheckoutSession'
-    );
-
-    // Call the function with the price ID and URLs
-    const result = await createCheckoutSessionFunction({ 
-      priceId,
-      successUrl: `${window.location.origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${window.location.origin}/cancel`,
-      customerEmail: auth.currentUser.email || undefined
-    });
-    
-    console.log('Function result:', result);
-
-    if (!result.data?.sessionId) {
-      console.error('No session ID returned from createCheckoutSession');
-      return { 
-        success: false, 
-        error: 'Failed to create checkout session',
-        details: 'No session ID in response'
-      };
-    }
-
-    console.log('Checkout session created successfully:', result.data.sessionId);
-    return { success: true, sessionId: result.data.sessionId };
-  } catch (error: any) {
-    console.error('Error creating checkout session:', error);
-    return { 
-      success: false, 
-      error: error.message || 'Failed to create checkout session',
-      details: error.details || error,
-      code: error.code || 'unknown'
-    };
-  }
-};
-
 // Function to get customer portal URL
 export const getCustomerPortalUrl = async () => {
   try {

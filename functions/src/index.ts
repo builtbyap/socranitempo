@@ -9,13 +9,25 @@ const corsHandler = cors({
   origin: ['https://socrani.com', 'http://localhost:3000', 'https://socranitempo.vercel.app'],
   methods: ['GET', 'POST', 'OPTIONS'],
   credentials: true,
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept']
 });
 
 // Initialize Stripe with Firebase config
 const stripe = new Stripe(functions.config().stripe.secret_key, {
   apiVersion: '2023-10-16',
 });
+
+// Helper function to handle CORS
+const handleCors = (req: functions.https.Request, res: functions.Response) => {
+  return new Promise((resolve, reject) => {
+    corsHandler(req, res, (result: any) => {
+      if (result instanceof Error) {
+        return reject(result);
+      }
+      return resolve(result);
+    });
+  });
+};
 
 // Function to create a customer record when a new user signs up
 export const onCreateUser = functions.auth.user().onCreate(async (user) => {
@@ -86,76 +98,50 @@ export const createCustomer = functions.https.onCall(async (data, context) => {
   }
 });
 
-export const createCheckoutSession = functions.https.onCall(async (data, context) => {
+export const createCheckoutSession = functions.https.onRequest(async (req, res) => {
   try {
-    // Log the incoming request data
-    console.log("Received request data:", data);
-    console.log("Auth context:", context.auth);
+    // Handle CORS
+    await handleCors(req, res);
 
-    // Check if user is authenticated
-    if (!context.auth) {
-      console.error("No authenticated user found");
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "User must be authenticated to create a checkout session"
-      );
+    // Only allow POST requests
+    if (req.method !== 'POST') {
+      res.status(405).send('Method Not Allowed');
+      return;
     }
 
-    // Check if Stripe secret key is configured
-    const stripeSecretKey = functions.config().stripe?.secret_key;
-    if (!stripeSecretKey) {
-      console.error("Stripe secret key is not configured");
-      throw new functions.https.HttpsError(
-        "internal",
-        "Stripe configuration is missing"
-      );
+    // Get the Firebase ID token from the Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      res.status(401).send('Unauthorized');
+      return;
     }
 
-    // Check if app URL is configured
-    const appUrl = functions.config().app?.url;
-    if (!appUrl) {
-      console.error("App URL is not configured");
-      throw new functions.https.HttpsError(
-        "internal",
-        "App URL configuration is missing"
-      );
+    const idToken = authHeader.split('Bearer ')[1];
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(idToken);
+    } catch (error) {
+      console.error('Error verifying ID token:', error);
+      res.status(401).send('Invalid ID token');
+      return;
     }
 
-    const { priceId } = data;
-    console.log("Price ID:", priceId);
-
-    // Validate price ID
-    if (!priceId || typeof priceId !== "string") {
-      console.error("Invalid price ID:", priceId);
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Price ID is required and must be a string"
-      );
-    }
-
-    if (!priceId.startsWith("price_")) {
-      console.error("Invalid price ID format:", priceId);
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Invalid price ID format"
-      );
+    const { priceId } = req.body;
+    if (!priceId) {
+      res.status(400).send('Price ID is required');
+      return;
     }
 
     // Get user email
-    const user = await admin.auth().getUser(context.auth.uid);
-    console.log("User details:", user);
-
+    const user = await admin.auth().getUser(decodedToken.uid);
     if (!user.email) {
-      console.error("User has no email:", user);
-      throw new functions.https.HttpsError(
-        "failed-precondition",
-        "User must have an email address"
-      );
+      res.status(400).send('User must have an email address');
+      return;
     }
 
     // Get or create Stripe customer
     const customersRef = admin.firestore().collection('customers');
-    const customerDoc = await customersRef.doc(context.auth.uid).get();
+    const customerDoc = await customersRef.doc(decodedToken.uid).get();
     let customerId;
 
     if (customerDoc.exists && customerDoc.data()?.stripeCustomerId) {
@@ -167,7 +153,7 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
         const customer = await stripe.customers.create({
           email: user.email,
           metadata: {
-            firebaseUID: context.auth.uid
+            firebaseUID: decodedToken.uid
           }
         });
         customerId = customer.id;
@@ -176,11 +162,11 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
         // Create customer portal session
         const portalSession = await stripe.billingPortal.sessions.create({
           customer: customerId,
-          return_url: `${appUrl}/dashboard`
+          return_url: `${functions.config().app.url}/dashboard`
         });
 
         // Save Stripe customer ID and portal link to Firestore
-        await customersRef.doc(context.auth.uid).set({
+        await customersRef.doc(decodedToken.uid).set({
           stripeCustomerId: customerId,
           stripeCustomerLink: portalSession.url,
           email: user.email,
@@ -189,24 +175,9 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
         }, { merge: true });
       } catch (error) {
         console.error("Error creating Stripe customer:", error);
-        throw new functions.https.HttpsError(
-          "internal",
-          "Failed to create Stripe customer",
-          error
-        );
+        res.status(500).send('Failed to create Stripe customer');
+        return;
       }
-    }
-
-    // Verify the price exists in Stripe
-    try {
-      const price = await stripe.prices.retrieve(priceId);
-      console.log("Retrieved price:", price);
-    } catch (error) {
-      console.error("Error retrieving price:", error);
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Invalid price ID"
-      );
     }
 
     // Create checkout session
@@ -220,35 +191,25 @@ export const createCheckoutSession = functions.https.onCall(async (data, context
             quantity: 1,
           },
         ],
-        success_url: `${appUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${appUrl}/pricing`,
+        success_url: `${functions.config().app.url}/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${functions.config().app.url}/pricing`,
         customer: customerId,
         metadata: {
-          userId: context.auth.uid,
+          userId: decodedToken.uid,
         },
       });
 
-      console.log("Created checkout session:", session);
-
-      return {
+      res.status(200).json({
         sessionId: session.id,
         url: session.url,
-      };
+      });
     } catch (error) {
       console.error("Error creating checkout session:", error);
-      throw new functions.https.HttpsError(
-        "internal",
-        "Failed to create checkout session",
-        error
-      );
+      res.status(500).send('Failed to create checkout session');
     }
   } catch (error) {
     console.error("Unexpected error:", error);
-    throw new functions.https.HttpsError(
-      "internal",
-      "An unexpected error occurred",
-      error
-    );
+    res.status(500).send('An unexpected error occurred');
   }
 });
 

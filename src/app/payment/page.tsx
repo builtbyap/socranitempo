@@ -20,6 +20,8 @@ import { collection, doc, addDoc, onSnapshot, getDoc, setDoc, serverTimestamp } 
 import { httpsCallable } from "firebase/functions";
 import { loadStripe } from "@stripe/stripe-js";
 import { toast } from "react-hot-toast";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
 // Initialize Stripe
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
@@ -143,34 +145,38 @@ export default function PaymentPage() {
     : null;
 
   const handleSubscribe = async (priceId: string) => {
+    const auth = getAuth();
+    const db = getFirestore();
+    const user = auth.currentUser;
     if (!user) {
-      toast.error('Please sign in to subscribe');
+      alert("Please sign in to subscribe");
       return;
     }
 
     try {
-      setProcessingPayment(true);
-      // Use the Stripe Firebase Extension instead of the frontend API route
-      const response = await (createCheckoutSession as any)({
-        priceId,
-        customerId: user.uid,
-        successUrl: `${window.location.origin}/payment/success`,
-        cancelUrl: `${window.location.origin}/payment`,
-      });
+      // Create a new checkout session in Firestore
+      const checkoutSessionRef = await addDoc(
+        collection(db, "customers", user.uid, "checkout_sessions"),
+        {
+          price: priceId,
+          success_url: window.location.origin + "/success",
+          cancel_url: window.location.origin + "/cancel",
+        }
+      );
 
-      if (response?.url) {
-        window.location.href = response.url;
-      } else if (response?.sessionId) {
-        const stripe = await loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
-        await stripe?.redirectToCheckout({ sessionId: response.sessionId });
-      } else {
-        throw new Error('Failed to create checkout session');
-      }
-    } catch (error) {
-      console.error('Payment error:', error);
-      toast.error('Failed to start checkout process');
-    } finally {
-      setProcessingPayment(false);
+      // Listen for the session URL and redirect
+      onSnapshot(checkoutSessionRef, (snap) => {
+        const { url, error } = snap.data() || {};
+        if (error) {
+          alert(error.message);
+        }
+        if (url) {
+          window.location.assign(url);
+        }
+      });
+    } catch (error: any) {
+      console.error("Error subscribing:", error);
+      alert(error.message || "An error occurred while processing your payment. Please try again.");
     }
   };
 
