@@ -21,29 +21,40 @@ export default async function Dashboard() {
   
   try {
     const customerDoc = await adminDb.collection("customers").doc(user.id).get();
-    const customerData = customerDoc.data();
     
-    console.log("Customer data:", customerData);
-
     if (!customerDoc.exists) {
-      console.log("No customer document found");
-      redirect("/pricing");
+      console.log("No customer document found for user:", user.id);
+      return redirect("/pricing");
     }
 
-    if (!customerData?.subscriptionStatus) {
-      console.log("No subscription status found");
-      redirect("/pricing");
+    const customerData = customerDoc.data();
+    console.log("Raw customer data:", customerData);
+
+    // Check if subscription data exists in any of the possible formats
+    const subscriptionStatus = 
+      customerData?.subscriptionStatus || 
+      customerData?.subscription?.status || 
+      customerData?.status;
+
+    console.log("Detected subscription status:", subscriptionStatus);
+
+    if (!subscriptionStatus) {
+      console.log("No subscription status found in customer data");
+      return redirect("/pricing");
     }
 
-    if (customerData.subscriptionStatus !== "active") {
-      console.log("Subscription not active:", customerData.subscriptionStatus);
-      redirect("/pricing");
+    // Normalize the status to lowercase for comparison
+    const normalizedStatus = subscriptionStatus.toLowerCase();
+    
+    if (normalizedStatus !== "active") {
+      console.log("Subscription not active. Current status:", normalizedStatus);
+      return redirect("/pricing");
     }
 
     console.log("Subscription is active, allowing access to dashboard");
   } catch (error) {
     console.error("Error checking subscription:", error);
-    redirect("/pricing");
+    return redirect("/pricing");
   }
 
   return (
