@@ -3,6 +3,7 @@ import DashboardTabs from "@/components/dashboard/tabs";
 import { InfoIcon } from "lucide-react";
 import { redirect } from "next/navigation";
 import { createClient } from "../../../supabase/server";
+import { adminDb } from "@/lib/firebase-admin";
 
 export default async function Dashboard() {
   const supabase = await createClient();
@@ -13,6 +14,13 @@ export default async function Dashboard() {
 
   if (!user) {
     return redirect("/sign-in");
+  }
+
+  const customerDoc = await adminDb.collection("customers").doc(user.id).get();
+  const customerData = customerDoc.data();
+
+  if (!customerData?.subscriptionStatus || customerData.subscriptionStatus !== "active") {
+    redirect("/pricing");
   }
 
   return (
