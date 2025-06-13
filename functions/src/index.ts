@@ -486,7 +486,9 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       throw new Error("No session ID provided");
     }
 
+    console.log("Request body:", req.body);
     console.log("Processing payment for session:", sessionId);
+    console.log("User ID from request:", requestUserId);
 
     // Retrieve the session from Stripe
     const session = await stripe.checkout.sessions.retrieve(sessionId);
@@ -498,7 +500,8 @@ export const handleSuccessfulPayment = functions.https.onRequest(async (req, res
       id: session.id,
       status: session.status,
       customer: session.customer,
-      subscription: session.subscription
+      subscription: session.subscription,
+      metadata: session.metadata
     });
 
     // Get the customer ID and subscription ID from the session

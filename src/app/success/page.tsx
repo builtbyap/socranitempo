@@ -72,17 +72,25 @@ function SuccessContent() {
           throw new Error('Authentication required');
         }
 
+        console.log('User authenticated:', {
+          uid: user.uid,
+          email: user.email
+        });
+
         // Call the Firebase function
+        const requestBody = { 
+          sessionId,
+          userId: user.uid 
+        };
+        console.log('Sending request to cloud function:', requestBody);
+
         const response = await fetch('https://us-central1-socrani-18328.cloudfunctions.net/handleSuccessfulPayment', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json'
           },
-          body: JSON.stringify({ 
-            sessionId,
-            userId: user.uid 
-          }),
+          body: JSON.stringify(requestBody),
           mode: 'cors',
           credentials: 'include'
         });
