@@ -37,35 +37,38 @@ export default async function Dashboard() {
 
     // Check for subscription data in various possible locations
     let subscriptionStatus = null;
+    let subscriptionData = null;
 
-    // Check direct subscriptionStatus field
+    // First, try to find the subscription data
+    if (customerData.subscription) {
+      subscriptionData = customerData.subscription;
+      console.log("Found subscription data:", JSON.stringify(subscriptionData, null, 2));
+    }
+
+    // Check all possible locations for subscription status
     if (typeof customerData.subscriptionStatus === 'string') {
       subscriptionStatus = customerData.subscriptionStatus;
-      console.log("Found subscriptionStatus:", subscriptionStatus);
-    }
-    // Check nested subscription object
-    else if (customerData.subscription && typeof customerData.subscription.status === 'string') {
-      subscriptionStatus = customerData.subscription.status;
-      console.log("Found subscription.status:", subscriptionStatus);
-    }
-    // Check direct status field
-    else if (typeof customerData.status === 'string') {
-      subscriptionStatus = customerData.status;
-      console.log("Found status:", subscriptionStatus);
-    }
-    // Check for subscription object with different structure
-    else if (customerData.subscription && typeof customerData.subscription === 'object') {
-      const subData = customerData.subscription;
-      if (typeof subData.subscriptionStatus === 'string') {
-        subscriptionStatus = subData.subscriptionStatus;
-        console.log("Found subscription.subscriptionStatus:", subscriptionStatus);
+      console.log("Found subscriptionStatus in root:", subscriptionStatus);
+    } else if (subscriptionData) {
+      if (typeof subscriptionData.status === 'string') {
+        subscriptionStatus = subscriptionData.status;
+        console.log("Found status in subscription object:", subscriptionStatus);
+      } else if (typeof subscriptionData.subscriptionStatus === 'string') {
+        subscriptionStatus = subscriptionData.subscriptionStatus;
+        console.log("Found subscriptionStatus in subscription object:", subscriptionStatus);
       }
+    } else if (typeof customerData.status === 'string') {
+      subscriptionStatus = customerData.status;
+      console.log("Found status in root:", subscriptionStatus);
     }
 
     if (!subscriptionStatus) {
       console.log("No valid subscription status found in customer data");
       console.log("Available fields:", Object.keys(customerData));
-      return redirect("/pricing");
+      if (subscriptionData) {
+        console.log("Subscription object fields:", Object.keys(subscriptionData));
+      }
+      throw new Error("Invalid subscription data: No valid status found");
     }
 
     // Normalize the status to lowercase for comparison
