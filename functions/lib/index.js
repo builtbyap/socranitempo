@@ -314,6 +314,7 @@ exports.getSubscriptionStatus = functions.https.onRequest((req, res) => {
         return;
     }
     return corsHandler(req, res, async () => {
+        var _a;
         try {
             // Get the user from the request
             const authHeader = req.headers.authorization;
@@ -344,16 +345,20 @@ exports.getSubscriptionStatus = functions.https.onRequest((req, res) => {
             }
             const customerData = customerDoc.data();
             // If there's no subscription data, return null
-            if (!(customerData === null || customerData === void 0 ? void 0 : customerData.subscription)) {
+            if (!(customerData === null || customerData === void 0 ? void 0 : customerData.subscriptionStatus)) {
                 res.json({ subscription: null });
                 return;
             }
             // Validate subscription data
-            const subscription = customerData.subscription;
-            if (!subscription.status || !subscription.type) {
-                res.json({ subscription: null });
-                return;
-            }
+            const subscription = {
+                status: customerData.subscriptionStatus,
+                type: customerData.subscriptionTier,
+                currentPeriodEnd: ((_a = customerData.subscriptionEndDate) === null || _a === void 0 ? void 0 : _a.toDate().getTime()) / 1000,
+                customerId: customerData.stripeCustomerId,
+                subscriptionId: customerData.stripeSubscriptionId,
+                priceId: customerData.stripePriceId,
+                productId: customerData.stripeProductId
+            };
             res.json({ subscription });
         }
         catch (error) {
@@ -402,11 +407,13 @@ exports.handleSuccessfulPayment = functions.https.onRequest(async (req, res) => 
             apiVersion: '2023-10-16',
         });
         // Get the session ID from the request body
-        const { sessionId } = req.body;
+        const { sessionId, userId: requestUserId } = req.body;
         if (!sessionId) {
             throw new Error("No session ID provided");
         }
+        console.log("Request body:", req.body);
         console.log("Processing payment for session:", sessionId);
+        console.log("User ID from request:", requestUserId);
         // Retrieve the session from Stripe
         const session = await stripe.checkout.sessions.retrieve(sessionId);
         if (!session) {
@@ -416,7 +423,8 @@ exports.handleSuccessfulPayment = functions.https.onRequest(async (req, res) => 
             id: session.id,
             status: session.status,
             customer: session.customer,
-            subscription: session.subscription
+            subscription: session.subscription,
+            metadata: session.metadata
         });
         // Get the customer ID and subscription ID from the session
         const customerId = session.customer;
@@ -451,10 +459,10 @@ exports.handleSuccessfulPayment = functions.https.onRequest(async (req, res) => 
             name: product.name,
             tier: tier
         });
-        // Get the user ID from the session metadata
-        const userId = (_b = session.metadata) === null || _b === void 0 ? void 0 : _b.userId;
+        // Get the user ID from either the request body or session metadata
+        const userId = requestUserId || ((_b = session.metadata) === null || _b === void 0 ? void 0 : _b.userId);
         if (!userId) {
-            throw new Error("No user ID found in session metadata");
+            throw new Error("No user ID found in request or session metadata");
         }
         // Get the user's email from Firebase Auth
         const userRecord = await admin.auth().getUser(userId);

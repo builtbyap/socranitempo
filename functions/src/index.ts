@@ -418,17 +418,21 @@ export const getSubscriptionStatus = functions.https.onRequest((req, res) => {
       const customerData = customerDoc.data();
       
       // If there's no subscription data, return null
-      if (!customerData?.subscription) {
+      if (!customerData?.subscriptionStatus) {
         res.json({ subscription: null });
         return;
       }
 
       // Validate subscription data
-      const subscription = customerData.subscription;
-      if (!subscription.status || !subscription.type) {
-        res.json({ subscription: null });
-        return;
-      }
+      const subscription = {
+        status: customerData.subscriptionStatus,
+        type: customerData.subscriptionTier,
+        currentPeriodEnd: customerData.subscriptionEndDate?.toDate().getTime() / 1000,
+        customerId: customerData.stripeCustomerId,
+        subscriptionId: customerData.stripeSubscriptionId,
+        priceId: customerData.stripePriceId,
+        productId: customerData.stripeProductId
+      };
 
       res.json({ subscription });
     } catch (error: any) {

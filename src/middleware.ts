@@ -1,71 +1,60 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { adminAuth, adminDb } from "@/lib/firebase-admin";
 
 export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
   const url = req.nextUrl.clone();
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return req.cookies.getAll().map(({ name, value }) => ({
-            name,
-            value,
-          }));
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            req.cookies.set(name, value);
-            res.cookies.set(name, value, options);
-          });
-        },
-      },
-    },
-  );
-
-  // Refresh session if expired - required for Server Components
-  const {
-    data: { session },
-    error,
-  } = await supabase.auth.getSession();
-
-  if (error) {
-    console.error("Auth session error:", error);
-  }
-
   // Check if the request is for the dashboard
   if (url.pathname.startsWith("/dashboard")) {
-    // If no session, redirect to sign-in
-    if (!session) {
-      url.pathname = "/sign-in";
-      return NextResponse.redirect(url);
-    }
-
-    // Don't redirect if coming from a successful payment
-    const paymentParam = url.searchParams.get("payment");
-    if (paymentParam === "success") {
-      return res;
-    }
-
-    // Check subscription status for authenticated users
     try {
-      const { data: userData } = await supabase
-        .from("users")
-        .select("subscription_status")
-        .eq("user_id", session.user.id)
-        .single();
+      // Get the Firebase ID token from the Authorization header
+      const authHeader = req.headers.get("authorization");
+      if (!authHeader?.startsWith("Bearer ")) {
+        url.pathname = "/sign-in";
+        return NextResponse.redirect(url);
+      }
 
-      // If user doesn't have an active subscription, redirect to payment page
-      if (!userData || userData.subscription_status !== "active") {
+      const idToken = authHeader.split("Bearer ")[1];
+      const decodedToken = await adminAuth.verifyIdToken(idToken);
+      const userId = decodedToken.uid;
+
+      // Don't redirect if coming from a successful payment
+      const paymentParam = url.searchParams.get("payment");
+      if (paymentParam === "success") {
+        return res;
+      }
+
+      // Check subscription status in Firestore
+      const customerDoc = await adminDb.collection("customers").doc(userId).get();
+      
+      if (!customerDoc.exists) {
         url.pathname = "/payment";
         return NextResponse.redirect(url);
       }
+
+      const customerData = customerDoc.data();
+      
+      // Check if subscription is active and not expired
+      if (!customerData?.subscriptionStatus || customerData.subscriptionStatus !== "active") {
+        url.pathname = "/payment";
+        return NextResponse.redirect(url);
+      }
+
+      // Check if subscription is expired
+      const currentPeriodEnd = customerData.subscriptionEndDate?.toDate();
+      if (currentPeriodEnd && currentPeriodEnd < new Date()) {
+        url.pathname = "/payment";
+        return NextResponse.redirect(url);
+      }
+
+      // If we get here, the user has an active subscription
+      return res;
     } catch (err) {
       console.error("Error checking subscription status:", err);
+      url.pathname = "/sign-in";
+      return NextResponse.redirect(url);
     }
   }
 
