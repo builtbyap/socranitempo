@@ -13,13 +13,36 @@ export default async function Dashboard() {
   } = await supabase.auth.getUser();
 
   if (!user) {
+    console.log("No user found, redirecting to sign-in");
     return redirect("/sign-in");
   }
 
-  const customerDoc = await adminDb.collection("customers").doc(user.id).get();
-  const customerData = customerDoc.data();
+  console.log("Checking subscription for user:", user.id);
+  
+  try {
+    const customerDoc = await adminDb.collection("customers").doc(user.id).get();
+    const customerData = customerDoc.data();
+    
+    console.log("Customer data:", customerData);
 
-  if (!customerData?.subscriptionStatus || customerData.subscriptionStatus !== "active") {
+    if (!customerDoc.exists) {
+      console.log("No customer document found");
+      redirect("/pricing");
+    }
+
+    if (!customerData?.subscriptionStatus) {
+      console.log("No subscription status found");
+      redirect("/pricing");
+    }
+
+    if (customerData.subscriptionStatus !== "active") {
+      console.log("Subscription not active:", customerData.subscriptionStatus);
+      redirect("/pricing");
+    }
+
+    console.log("Subscription is active, allowing access to dashboard");
+  } catch (error) {
+    console.error("Error checking subscription:", error);
     redirect("/pricing");
   }
 
