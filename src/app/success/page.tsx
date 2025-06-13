@@ -37,7 +37,6 @@ function SuccessContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
-  const [success, setSuccess] = useState(false);
   const maxRetries = 3;
 
   useEffect(() => {
@@ -104,11 +103,8 @@ function SuccessContent() {
         console.log('Payment processed successfully:', result);
 
         if (result.success) {
-          setSuccess(true);
-          // Wait for 2 seconds to show success message
-          setTimeout(() => {
-            router.push('/dashboard');
-          }, 2000);
+          // Redirect to dashboard immediately after successful payment
+          router.push('/dashboard');
         } else {
           throw new Error(result.error || 'Payment processing failed');
         }
@@ -153,22 +149,6 @@ function SuccessContent() {
               Sign In
             </Button>
           )}
-        </CardFooter>
-      </Card>
-    );
-  }
-
-  if (success) {
-    return (
-      <Card className="w-[350px]">
-        <CardHeader>
-          <CardTitle>Payment Successful!</CardTitle>
-          <CardDescription>Your subscription has been activated.</CardDescription>
-        </CardHeader>
-        <CardFooter>
-          <Button className="w-full" onClick={() => router.push('/dashboard')}>
-            Go to Dashboard
-          </Button>
         </CardFooter>
       </Card>
     );
