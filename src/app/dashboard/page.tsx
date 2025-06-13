@@ -28,23 +28,49 @@ export default async function Dashboard() {
     }
 
     const customerData = customerDoc.data();
-    console.log("Raw customer data:", customerData);
+    console.log("Raw customer data:", JSON.stringify(customerData, null, 2));
 
-    // Check if subscription data exists in any of the possible formats
-    const subscriptionStatus = 
-      customerData?.subscriptionStatus || 
-      customerData?.subscription?.status || 
-      customerData?.status;
+    if (!customerData) {
+      console.log("Customer data is null or undefined");
+      return redirect("/pricing");
+    }
 
-    console.log("Detected subscription status:", subscriptionStatus);
+    // Check for subscription data in various possible locations
+    let subscriptionStatus = null;
+
+    // Check direct subscriptionStatus field
+    if (typeof customerData.subscriptionStatus === 'string') {
+      subscriptionStatus = customerData.subscriptionStatus;
+      console.log("Found subscriptionStatus:", subscriptionStatus);
+    }
+    // Check nested subscription object
+    else if (customerData.subscription && typeof customerData.subscription.status === 'string') {
+      subscriptionStatus = customerData.subscription.status;
+      console.log("Found subscription.status:", subscriptionStatus);
+    }
+    // Check direct status field
+    else if (typeof customerData.status === 'string') {
+      subscriptionStatus = customerData.status;
+      console.log("Found status:", subscriptionStatus);
+    }
+    // Check for subscription object with different structure
+    else if (customerData.subscription && typeof customerData.subscription === 'object') {
+      const subData = customerData.subscription;
+      if (typeof subData.subscriptionStatus === 'string') {
+        subscriptionStatus = subData.subscriptionStatus;
+        console.log("Found subscription.subscriptionStatus:", subscriptionStatus);
+      }
+    }
 
     if (!subscriptionStatus) {
-      console.log("No subscription status found in customer data");
+      console.log("No valid subscription status found in customer data");
+      console.log("Available fields:", Object.keys(customerData));
       return redirect("/pricing");
     }
 
     // Normalize the status to lowercase for comparison
-    const normalizedStatus = subscriptionStatus.toLowerCase();
+    const normalizedStatus = subscriptionStatus.toLowerCase().trim();
+    console.log("Normalized subscription status:", normalizedStatus);
     
     if (normalizedStatus !== "active") {
       console.log("Subscription not active. Current status:", normalizedStatus);
@@ -54,6 +80,10 @@ export default async function Dashboard() {
     console.log("Subscription is active, allowing access to dashboard");
   } catch (error) {
     console.error("Error checking subscription:", error);
+    if (error instanceof Error) {
+      console.error("Error details:", error.message);
+      console.error("Error stack:", error.stack);
+    }
     return redirect("/pricing");
   }
 
