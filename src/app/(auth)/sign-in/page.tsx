@@ -30,14 +30,19 @@ function SignInForm() {
     setIsLoading(true);
     try {
       const { success, error, subscription } = await signInWithGoogle();
+      console.log('Sign-in result:', { success, error, subscription });
       if (success) {
-        if (subscription?.status === 'active') {
-          console.log('User has active subscription, redirecting to dashboard');
-          router.push('/dashboard');
-        } else {
-          console.log('No active subscription, redirecting to payment');
-          router.push('/payment');
+        if (subscription) {
+          const status = (subscription.status || '').toLowerCase();
+          const isActive = status === 'active' && !subscription.isExpired;
+          console.log('Subscription status:', status, 'Is active:', isActive, 'Subscription:', subscription);
+          if (isActive) {
+            router.push('/dashboard');
+            return;
+          }
         }
+        console.log('No active subscription, redirecting to payment', subscription);
+        router.push('/payment');
       } else {
         setError(error || 'Failed to sign in with Google');
       }
