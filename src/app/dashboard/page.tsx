@@ -2,28 +2,27 @@ import DashboardNavbar from "@/components/dashboard-navbar";
 import DashboardTabs from "@/components/dashboard/tabs";
 import { InfoIcon } from "lucide-react";
 import { redirect } from "next/navigation";
-import { createClient } from "../../../supabase/server";
-import { adminDb } from "@/lib/firebase-admin";
+import { auth, db } from "@/lib/firebase";
+import { doc, getDoc, collection, getDocs } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 
 export default async function Dashboard() {
-  const supabase = await createClient();
+  // Get current user from Firebase Auth
+  const currentUser = auth.currentUser;
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!currentUser) {
     console.log("No user found, redirecting to sign-in");
     return redirect("/sign-in");
   }
 
-  console.log("Checking subscription for user:", user.id);
+  console.log("Checking subscription for user:", currentUser.uid);
   
   try {
-    const customerDoc = await adminDb.collection("customers").doc(user.id).get();
+    const customerRef = doc(db, "customers", currentUser.uid);
+    const customerDoc = await getDoc(customerRef);
     
-    if (!customerDoc.exists) {
-      console.log("No customer document found for user:", user.id);
+    if (!customerDoc.exists()) {
+      console.log("No customer document found for user:", currentUser.uid);
       return redirect("/pricing");
     }
 
@@ -40,7 +39,7 @@ export default async function Dashboard() {
     let subscriptionData = null;
 
     // First, try to find the subscription data in the subscriptions subcollection
-    const subscriptionsSnapshot = await customerDoc.ref.collection('subscriptions').get();
+    const subscriptionsSnapshot = await getDocs(collection(customerRef, 'subscriptions'));
     if (!subscriptionsSnapshot.empty) {
       const latestSubscription = subscriptionsSnapshot.docs[0].data();
       subscriptionData = latestSubscription;
