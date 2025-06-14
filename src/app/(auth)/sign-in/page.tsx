@@ -12,8 +12,14 @@ function SignInForm() {
   const router = useRouter();
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
   const handleGoogleSignIn = async () => {
+    if (isRedirecting) {
+      console.log('Already redirecting, ignoring sign-in attempt');
+      return;
+    }
+
     setError('');
     setIsLoading(true);
     try {
@@ -26,12 +32,14 @@ function SignInForm() {
           console.log('Subscription status:', status, 'Is active:', isActive, 'Subscription:', subscription);
           if (isActive) {
             console.log('Redirecting to dashboard...');
-            router.replace('/dashboard');
+            setIsRedirecting(true);
+            window.location.href = '/dashboard';
             return;
           }
         }
         console.log('No active subscription, redirecting to payment', subscription);
-        router.replace('/payment');
+        setIsRedirecting(true);
+        window.location.href = '/payment';
       } else {
         setError(error || 'Failed to sign in with Google');
       }
