@@ -36,33 +36,22 @@ function SuccessContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
   useEffect(() => {
-    const processPayment = async () => {
+    let unsubscribe: (() => void) | null = null;
+    let timeout: NodeJS.Timeout | null = null;
+
+    const processPayment = async (user: any) => {
       try {
         const sessionId = searchParams.get('session_id');
-        if (!sessionId) {
-          throw new Error('No session ID found');
-        }
+        if (!sessionId) throw new Error('No session ID found');
+        if (!user) throw new Error('No authenticated user found');
 
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-          throw new Error('No authenticated user found');
-        }
-
-        const requestBody = {
-          sessionId,
-          userId: currentUser.uid
-        };
-
+        const requestBody = { sessionId, userId: user.uid };
         const response = await fetch('https://us-central1-socrani-18328.cloudfunctions.net/handleSuccessfulPayment', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
           body: JSON.stringify(requestBody),
           mode: 'cors',
           credentials: 'include'
@@ -74,27 +63,38 @@ function SuccessContent() {
         }
 
         const result = await response.json();
-        console.log('Payment processed successfully:', result);
-
         if (result.success) {
           setPaymentSuccess(true);
-          // Wait for 2 seconds to show success message before redirecting
-          setTimeout(() => {
-            router.push('/dashboard');
-          }, 2000);
+          setTimeout(() => router.push('/dashboard'), 2000);
         } else {
           throw new Error(result.error || 'Payment processing failed');
         }
       } catch (err: any) {
-        console.error('Error processing payment:', err);
         setError(err.message || 'An error occurred while processing your payment');
       } finally {
         setLoading(false);
       }
     };
 
-    processPayment();
-  }, [searchParams, router, retryCount]);
+    unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        processPayment(user);
+        if (unsubscribe) unsubscribe();
+        if (timeout) clearTimeout(timeout);
+      } else {
+        // Wait a bit for auth to load, then redirect if still not authenticated
+        timeout = setTimeout(() => {
+          setError('You must be signed in to complete payment.');
+          router.push('/sign-in');
+        }, 3000);
+      }
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [searchParams, router]);
 
   if (loading) {
     return (
