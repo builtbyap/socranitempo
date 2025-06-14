@@ -27,9 +27,6 @@ function SignInForm() {
       console.log('Sign-in result:', { success, error, subscription });
       
       if (success) {
-        // Wait for Firebase Auth to be ready
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
         if (subscription) {
           const status = (subscription.status || '').toLowerCase();
           const isActive = status === 'active' && !subscription.isExpired;
@@ -38,7 +35,6 @@ function SignInForm() {
           if (isActive) {
             console.log('Redirecting to dashboard...');
             setIsRedirecting(true);
-            // Use router.replace for more reliable navigation
             router.replace('/dashboard');
             return;
           }
