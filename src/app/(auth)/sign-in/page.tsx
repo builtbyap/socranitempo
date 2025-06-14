@@ -13,18 +13,6 @@ function SignInForm() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Check if user is already authenticated
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        console.log('User already authenticated, redirecting to dashboard');
-        router.push('/dashboard');
-      }
-    });
-
-    return () => unsubscribe();
-  }, [router]);
-
   const handleGoogleSignIn = async () => {
     setError('');
     setIsLoading(true);
@@ -37,12 +25,13 @@ function SignInForm() {
           const isActive = status === 'active' && !subscription.isExpired;
           console.log('Subscription status:', status, 'Is active:', isActive, 'Subscription:', subscription);
           if (isActive) {
-            router.push('/dashboard');
+            console.log('Redirecting to dashboard...');
+            router.replace('/dashboard');
             return;
           }
         }
         console.log('No active subscription, redirecting to payment', subscription);
-        router.push('/payment');
+        router.replace('/payment');
       } else {
         setError(error || 'Failed to sign in with Google');
       }
