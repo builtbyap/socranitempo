@@ -37,7 +37,6 @@ export default function SuccessPage() {
 function SuccessContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [paymentSuccess, setPaymentSuccess] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -62,19 +61,13 @@ function SuccessContent() {
 
         // Process the payment
         const handlePayment = httpsCallable(functions, 'handleSuccessfulPayment');
-        const result = await handlePayment({ 
+        await handlePayment({ 
           sessionId,
           userId: currentUser.uid
         });
 
-        console.log('Payment processed successfully:', result.data);
-
-        // Set success state and redirect after a short delay
-        setPaymentSuccess(true);
-        setTimeout(() => {
-          router.push('/dashboard');
-        }, 2000);
-
+        // Immediately redirect to dashboard
+        router.push('/dashboard');
       } catch (error: any) {
         console.error('Error processing payment:', error);
         setError(error.message || 'Failed to process payment');
@@ -114,23 +107,6 @@ function SuccessContent() {
           <Button asChild className="w-full">
             <Link href="/pricing">Return to Pricing</Link>
           </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (paymentSuccess) {
-    return (
-      <Card className="w-[350px]">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CheckCircle2 className="h-6 w-6 text-green-500" />
-            Payment Successful
-          </CardTitle>
-          <CardDescription>Your subscription has been activated</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-green-600 mb-4">Redirecting to dashboard...</p>
         </CardContent>
       </Card>
     );
