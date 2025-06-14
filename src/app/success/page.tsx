@@ -74,12 +74,27 @@ function SuccessContent() {
 
         console.log('Processing payment for user:', user.uid);
 
-        // Process the payment
-        const handlePayment = httpsCallable(functions, 'handleSuccessfulPayment');
-        await handlePayment({ 
-          sessionId,
-          userId: user.uid
+        // Process the payment using fetch instead of httpsCallable
+        const response = await fetch('https://us-central1-socrani-18328.cloudfunctions.net/handleSuccessfulPayment', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sessionId,
+            userId: user.uid
+          })
         });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to process payment');
+        }
+
+        const result = await response.json();
+        if (!result.success) {
+          throw new Error(result.error || 'Payment processing failed');
+        }
 
         console.log('Payment processed successfully, redirecting to dashboard');
         router.push('/dashboard');
