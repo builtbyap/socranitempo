@@ -1,15 +1,12 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { signInWithGoogle, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import Link from 'next/link';
-import { onAuthStateChanged } from 'firebase/auth';
 
 function SignInForm() {
-  const router = useRouter();
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -23,6 +20,7 @@ function SignInForm() {
     setError('');
     setIsLoading(true);
     try {
+      console.log('Starting Google sign-in process...');
       const { success, error, subscription } = await signInWithGoogle();
       console.log('Sign-in result:', { success, error, subscription });
       
@@ -33,17 +31,18 @@ function SignInForm() {
           console.log('Subscription status:', status, 'Is active:', isActive, 'Subscription:', subscription);
           
           if (isActive) {
-            console.log('Redirecting to dashboard...');
+            console.log('User has active subscription, redirecting to dashboard...');
             setIsRedirecting(true);
-            router.replace('/dashboard');
+            window.location.href = '/dashboard';
             return;
           }
         }
         
-        console.log('No active subscription, redirecting to payment', subscription);
+        console.log('No active subscription, redirecting to payment...');
         setIsRedirecting(true);
-        router.replace('/payment');
+        window.location.href = '/payment';
       } else {
+        console.error('Sign-in failed:', error);
         setError(error || 'Failed to sign in with Google');
       }
     } catch (err) {
@@ -61,8 +60,12 @@ function SignInForm() {
         <CardDescription>Sign in to your account using Google</CardDescription>
       </CardHeader>
       <CardContent>
-        <Button onClick={handleGoogleSignIn} disabled={isLoading} className="w-full">
-          {isLoading ? 'Signing in...' : 'Sign in with Google'}
+        <Button 
+          onClick={handleGoogleSignIn} 
+          disabled={isLoading || isRedirecting} 
+          className="w-full"
+        >
+          {isLoading ? 'Signing in...' : isRedirecting ? 'Redirecting...' : 'Sign in with Google'}
         </Button>
         {error && <div className="text-red-500 text-sm mt-4">{error}</div>}
       </CardContent>
