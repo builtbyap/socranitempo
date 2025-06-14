@@ -3,13 +3,16 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from '@/lib/firebase/auth';
+import { auth } from '@/lib/firebase';
 import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/db';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, CheckCircle2 } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { Suspense } from 'react';
+import Link from 'next/link';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '@/lib/firebase';
 
 export default function SuccessPage() {
   return (
@@ -32,76 +35,63 @@ export default function SuccessPage() {
 }
 
 function SuccessContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
-    let timeout: NodeJS.Timeout | null = null;
-
-    const processPayment = async (user: any) => {
+    async function processPayment() {
       try {
-        const sessionId = searchParams.get('session_id');
-        if (!sessionId) throw new Error('No session ID found');
-        if (!user) throw new Error('No authenticated user found');
+        setLoading(true);
+        setError(null);
 
-        const requestBody = { sessionId, userId: user.uid };
-        const response = await fetch('https://us-central1-socrani-18328.cloudfunctions.net/handleSuccessfulPayment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify(requestBody),
-          mode: 'cors',
-          credentials: 'include'
+        // Get session ID from URL
+        const params = new URLSearchParams(window.location.search);
+        const sessionId = params.get('session_id');
+
+        if (!sessionId) {
+          throw new Error('No session ID found');
+        }
+
+        // Get current user
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          throw new Error('No authenticated user found');
+        }
+
+        // Process the payment
+        const handlePayment = httpsCallable(functions, 'handleSuccessfulPayment');
+        const result = await handlePayment({ 
+          sessionId,
+          userId: currentUser.uid
         });
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ error: 'Failed to process payment' }));
-          throw new Error(errorData.error || 'Failed to process payment');
-        }
+        console.log('Payment processed successfully:', result.data);
 
-        const result = await response.json();
-        if (result.success) {
-          setPaymentSuccess(true);
-          setTimeout(() => router.push('/dashboard'), 2000);
-        } else {
-          throw new Error(result.error || 'Payment processing failed');
-        }
-      } catch (err: any) {
-        setError(err.message || 'An error occurred while processing your payment');
+        // Set success state and redirect after a short delay
+        setPaymentSuccess(true);
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 2000);
+
+      } catch (error: any) {
+        console.error('Error processing payment:', error);
+        setError(error.message || 'Failed to process payment');
       } finally {
         setLoading(false);
       }
-    };
+    }
 
-    unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        processPayment(user);
-        if (unsubscribe) unsubscribe();
-        if (timeout) clearTimeout(timeout);
-      } else {
-        // Wait a bit for auth to load, then redirect if still not authenticated
-        timeout = setTimeout(() => {
-          setError('You must be signed in to complete payment.');
-          router.push('/sign-in');
-        }, 3000);
-      }
-    });
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-      if (timeout) clearTimeout(timeout);
-    };
-  }, [searchParams, router]);
+    processPayment();
+  }, [router]);
 
   if (loading) {
     return (
       <Card className="w-[350px]">
         <CardHeader>
           <CardTitle>Processing Payment</CardTitle>
-          <CardDescription>Please wait while we process your payment...</CardDescription>
+          <CardDescription>Please wait while we confirm your subscription</CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -114,16 +104,15 @@ function SuccessContent() {
     return (
       <Card className="w-[350px]">
         <CardHeader>
-          <CardTitle>Payment Error</CardTitle>
-          <CardDescription>There was an error processing your payment</CardDescription>
+          <CardTitle className="flex items-center gap-2 text-red-600">
+            <XCircle className="h-6 w-6" />
+            Payment Error
+          </CardTitle>
+          <CardDescription>{error}</CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-red-600 mb-4">{error}</p>
-          <Button 
-            onClick={() => router.push('/pricing')}
-            className="w-full"
-          >
-            Return to Pricing
+          <Button asChild className="w-full">
+            <Link href="/pricing">Return to Pricing</Link>
           </Button>
         </CardContent>
       </Card>
