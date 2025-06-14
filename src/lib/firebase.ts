@@ -250,34 +250,65 @@ export const getSubscriptionStatus = async (userId: string) => {
     const data = docSnap.data();
     console.log('Customer data:', data);
     
-    // Check if the subscription data exists and is valid
-    if (!data.subscriptionStatus || !data.currentPeriodEnd) {
-      console.log('Invalid subscription data for user:', userId, 'Data:', data);
-      return { subscription: null, error: 'Invalid subscription data' };
+    // Check for subscription data in various possible locations
+    let subscriptionStatus = null;
+    let currentPeriodEnd = null;
+    let priceId = null;
+
+    // Check root document fields
+    if (data.subscriptionStatus) {
+      subscriptionStatus = data.subscriptionStatus;
+      currentPeriodEnd = data.subscriptionEndDate?.toDate();
+      priceId = data.stripePriceId;
+    } else if (data.subscription?.status) {
+      subscriptionStatus = data.subscription.status;
+      currentPeriodEnd = data.subscription.currentPeriodEnd?.toDate();
+      priceId = data.subscription.priceId;
+    } else if (data.status) {
+      subscriptionStatus = data.status;
+      currentPeriodEnd = data.currentPeriodEnd?.toDate();
+      priceId = data.priceId;
+    }
+
+    // If no subscription data found in root, check subcollection
+    if (!subscriptionStatus) {
+      const subscriptionsSnapshot = await getDocs(collection(userRef, 'subscriptions'));
+      if (!subscriptionsSnapshot.empty) {
+        const latestSubscription = subscriptionsSnapshot.docs[0].data();
+        subscriptionStatus = latestSubscription.status;
+        currentPeriodEnd = latestSubscription.currentPeriodEnd?.toDate();
+        priceId = latestSubscription.priceId;
+      }
+    }
+
+    // If still no subscription data found, return null
+    if (!subscriptionStatus) {
+      console.log('No valid subscription status found in customer data');
+      console.log('Available fields:', Object.keys(data));
+      return { subscription: null, error: 'No subscription found' };
     }
 
     // Check if the subscription is expired
-    const currentPeriodEnd = new Date(data.currentPeriodEnd);
     const now = new Date();
-    const isExpired = currentPeriodEnd < now;
+    const isExpired = currentPeriodEnd ? currentPeriodEnd < now : true;
     
     console.log('Subscription details:', {
-      status: data.subscriptionStatus,
-      currentPeriodEnd: currentPeriodEnd.toISOString(),
+      status: subscriptionStatus,
+      currentPeriodEnd: currentPeriodEnd?.toISOString(),
       now: now.toISOString(),
       isExpired
     });
     
     // If subscription is expired, return null
-    if (isExpired && data.subscriptionStatus === 'active') {
+    if (isExpired && subscriptionStatus === 'active') {
       console.log('Subscription expired for user:', userId);
       return { subscription: null, error: 'Subscription expired' };
     }
 
     const subscription = {
-      status: data.subscriptionStatus,
-      priceId: data.priceId,
-      currentPeriodEnd: data.currentPeriodEnd,
+      status: subscriptionStatus,
+      priceId: priceId,
+      currentPeriodEnd: currentPeriodEnd?.toISOString(),
       isExpired
     };
 
