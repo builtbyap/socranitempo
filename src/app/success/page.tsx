@@ -8,7 +8,7 @@ import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/db';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
+import { Loader2, CheckCircle2 } from "lucide-react";
 import { Suspense } from 'react';
 
 export default function SuccessPage() {
@@ -37,51 +37,25 @@ function SuccessContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
-  const maxRetries = 3;
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
 
   useEffect(() => {
     const processPayment = async () => {
       try {
         const sessionId = searchParams.get('session_id');
         if (!sessionId) {
-          throw new Error('No session ID found in URL');
+          throw new Error('No session ID found');
         }
 
-        console.log('Processing payment for session:', sessionId);
-
-        // Wait for authentication
-        const user = await new Promise<User>((resolve, reject) => {
-          const unsubscribe = onAuthStateChanged(auth, (user) => {
-            unsubscribe();
-            if (user) {
-              resolve(user);
-            } else if (retryCount < maxRetries) {
-              console.log(`User not authenticated, retry ${retryCount + 1}/${maxRetries}`);
-              setRetryCount(prev => prev + 1);
-              setTimeout(() => {
-                processPayment();
-              }, 2000);
-            } else {
-              reject(new Error('Authentication required'));
-            }
-          });
-        });
-
-        if (!user) {
-          throw new Error('Authentication required');
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          throw new Error('No authenticated user found');
         }
 
-        console.log('User authenticated:', {
-          uid: user.uid,
-          email: user.email
-        });
-
-        // Call the Firebase function
-        const requestBody = { 
+        const requestBody = {
           sessionId,
-          userId: user.uid 
+          userId: currentUser.uid
         };
-        console.log('Sending request to cloud function:', requestBody);
 
         const response = await fetch('https://us-central1-socrani-18328.cloudfunctions.net/handleSuccessfulPayment', {
           method: 'POST',
@@ -103,8 +77,11 @@ function SuccessContent() {
         console.log('Payment processed successfully:', result);
 
         if (result.success) {
-          // Redirect to dashboard immediately after successful payment
-          router.push('/dashboard');
+          setPaymentSuccess(true);
+          // Wait for 2 seconds to show success message before redirecting
+          setTimeout(() => {
+            router.push('/dashboard');
+          }, 2000);
         } else {
           throw new Error(result.error || 'Payment processing failed');
         }
@@ -138,18 +115,34 @@ function SuccessContent() {
       <Card className="w-[350px]">
         <CardHeader>
           <CardTitle>Payment Error</CardTitle>
-          <CardDescription>{error}</CardDescription>
+          <CardDescription>There was an error processing your payment</CardDescription>
         </CardHeader>
-        <CardFooter className="flex justify-between">
-          <Button variant="outline" onClick={() => router.push('/pricing')}>
+        <CardContent>
+          <p className="text-red-600 mb-4">{error}</p>
+          <Button 
+            onClick={() => router.push('/pricing')}
+            className="w-full"
+          >
             Return to Pricing
           </Button>
-          {error.includes('Authentication required') && (
-            <Button onClick={() => router.push('/signin')}>
-              Sign In
-            </Button>
-          )}
-        </CardFooter>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (paymentSuccess) {
+    return (
+      <Card className="w-[350px]">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CheckCircle2 className="h-6 w-6 text-green-500" />
+            Payment Successful
+          </CardTitle>
+          <CardDescription>Your subscription has been activated</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-green-600 mb-4">Redirecting to dashboard...</p>
+        </CardContent>
       </Card>
     );
   }

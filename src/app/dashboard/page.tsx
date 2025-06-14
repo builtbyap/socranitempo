@@ -39,27 +39,28 @@ export default async function Dashboard() {
     let subscriptionStatus = null;
     let subscriptionData = null;
 
-    // First, try to find the subscription data
-    if (customerData.subscription) {
-      subscriptionData = customerData.subscription;
-      console.log("Found subscription data:", JSON.stringify(subscriptionData, null, 2));
+    // First, try to find the subscription data in the subscriptions subcollection
+    const subscriptionsSnapshot = await customerDoc.ref.collection('subscriptions').get();
+    if (!subscriptionsSnapshot.empty) {
+      const latestSubscription = subscriptionsSnapshot.docs[0].data();
+      subscriptionData = latestSubscription;
+      subscriptionStatus = latestSubscription.status;
+      console.log("Found subscription in subcollection:", subscriptionStatus);
     }
 
-    // Check all possible locations for subscription status
-    if (typeof customerData.subscriptionStatus === 'string') {
-      subscriptionStatus = customerData.subscriptionStatus;
-      console.log("Found subscriptionStatus in root:", subscriptionStatus);
-    } else if (subscriptionData) {
-      if (typeof subscriptionData.status === 'string') {
-        subscriptionStatus = subscriptionData.status;
-        console.log("Found status in subscription object:", subscriptionStatus);
-      } else if (typeof subscriptionData.subscriptionStatus === 'string') {
-        subscriptionStatus = subscriptionData.subscriptionStatus;
-        console.log("Found subscriptionStatus in subscription object:", subscriptionStatus);
+    // If no subscription found in subcollection, check the root document
+    if (!subscriptionStatus) {
+      if (customerData.subscription) {
+        subscriptionData = customerData.subscription;
+        subscriptionStatus = subscriptionData.status || subscriptionData.subscriptionStatus;
+        console.log("Found subscription in root:", subscriptionStatus);
+      } else if (customerData.subscriptionStatus) {
+        subscriptionStatus = customerData.subscriptionStatus;
+        console.log("Found subscriptionStatus in root:", subscriptionStatus);
+      } else if (customerData.status) {
+        subscriptionStatus = customerData.status;
+        console.log("Found status in root:", subscriptionStatus);
       }
-    } else if (typeof customerData.status === 'string') {
-      subscriptionStatus = customerData.status;
-      console.log("Found status in root:", subscriptionStatus);
     }
 
     if (!subscriptionStatus) {
@@ -68,19 +69,25 @@ export default async function Dashboard() {
       if (subscriptionData) {
         console.log("Subscription object fields:", Object.keys(subscriptionData));
       }
-      throw new Error("Invalid subscription data: No valid status found");
+      return redirect("/pricing");
     }
 
     // Normalize the status to lowercase for comparison
     const normalizedStatus = subscriptionStatus.toLowerCase().trim();
     console.log("Normalized subscription status:", normalizedStatus);
     
-    if (normalizedStatus !== "active") {
-      console.log("Subscription not active. Current status:", normalizedStatus);
+    // Check if subscription is active and not expired
+    const isActive = normalizedStatus === "active";
+    const isExpired = subscriptionData?.currentPeriodEnd 
+      ? new Date(subscriptionData.currentPeriodEnd.toDate()) < new Date()
+      : false;
+
+    if (!isActive || isExpired) {
+      console.log("Subscription not active or expired. Status:", normalizedStatus, "Expired:", isExpired);
       return redirect("/pricing");
     }
 
-    console.log("Subscription is active, allowing access to dashboard");
+    console.log("Subscription is active and valid, allowing access to dashboard");
   } catch (error) {
     console.error("Error checking subscription:", error);
     if (error instanceof Error) {
