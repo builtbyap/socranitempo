@@ -37,10 +37,29 @@ export default function SuccessPage() {
 function SuccessContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const router = useRouter();
 
+  // Handle authentication state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      if (!user) {
+        console.log('No authenticated user found, redirecting to sign-in');
+        router.push('/sign-in');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
+  // Process payment once we have an authenticated user
   useEffect(() => {
     async function processPayment() {
+      if (!user) {
+        return; // Wait for user to be authenticated
+      }
+
       try {
         setLoading(true);
         setError(null);
@@ -53,20 +72,16 @@ function SuccessContent() {
           throw new Error('No session ID found');
         }
 
-        // Get current user
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-          throw new Error('No authenticated user found');
-        }
+        console.log('Processing payment for user:', user.uid);
 
         // Process the payment
         const handlePayment = httpsCallable(functions, 'handleSuccessfulPayment');
         await handlePayment({ 
           sessionId,
-          userId: currentUser.uid
+          userId: user.uid
         });
 
-        // Immediately redirect to dashboard
+        console.log('Payment processed successfully, redirecting to dashboard');
         router.push('/dashboard');
       } catch (error: any) {
         console.error('Error processing payment:', error);
@@ -76,8 +91,10 @@ function SuccessContent() {
       }
     }
 
-    processPayment();
-  }, [router]);
+    if (user) {
+      processPayment();
+    }
+  }, [user, router]);
 
   if (loading) {
     return (
