@@ -1,6 +1,6 @@
 "use client";
 
-import { User } from "@supabase/supabase-js";
+import { User } from "firebase/auth";
 import {
   Dialog,
   DialogContent,
@@ -17,25 +17,21 @@ interface UserProfileDetailsProps {
 
 export default function UserProfileDetails({ user }: UserProfileDetailsProps) {
   return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button variant="ghost" className="w-full justify-start">
-          View Profile Details
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <UserCircle className="h-5 w-5" />
-            User Profile
-          </DialogTitle>
-        </DialogHeader>
-        <div className="bg-muted/50 rounded-lg p-4 overflow-hidden">
-          <pre className="text-xs font-mono max-h-48 overflow-auto">
-            {JSON.stringify(user, null, 2)}
-          </pre>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <div className="space-y-4">
+      <div>
+        <h3 className="text-lg font-medium">Email</h3>
+        <p className="text-sm text-muted-foreground">{user.email}</p>
+      </div>
+      <div>
+        <h3 className="text-lg font-medium">User ID</h3>
+        <p className="text-sm text-muted-foreground">{user.uid}</p>
+      </div>
+      <div>
+        <h3 className="text-lg font-medium">Email Verified</h3>
+        <p className="text-sm text-muted-foreground">
+          {user.emailVerified ? "Yes" : "No"}
+        </p>
+      </div>
+    </div>
   );
 }

@@ -1,21 +1,28 @@
-import React from "react";
-import { updateSession } from "./supabase/middleware";
-import { type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-export async function middleware(request: NextRequest) {
-  return await updateSession(request);
+export function middleware(req: NextRequest) {
+  const url = req.nextUrl.clone();
+
+  // Check for Firebase auth token
+  const authToken = req.cookies.get("__session")?.value;
+  
+  // Protected routes that require authentication
+  if (url.pathname.startsWith("/dashboard") && !authToken) {
+    url.pathname = "/sign-in";
+    return NextResponse.redirect(url);
+  }
+
+  // Redirect authenticated users away from auth pages
+  if ((url.pathname === "/sign-in" || url.pathname === "/sign-up") && authToken) {
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
 }
 
+// Configure which routes to run middleware on
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - images - .svg, .png, .jpg, .jpeg, .gif, .webp
-     * Feel free to modify this pattern to include more paths.
-     */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-  ],
+  matcher: ["/dashboard/:path*", "/sign-in", "/sign-up"]
 };

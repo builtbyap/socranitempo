@@ -1,11 +1,17 @@
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { redirect } from "next/navigation";
 import Hero from "@/components/hero";
 import Navbar from "@/components/navbar";
 import { ArrowUpRight, CheckCircle2, Shield, Users, Zap } from 'lucide-react';
-import { createClient } from "../../supabase/server";
 
 export default async function Home() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  // Check if user is authenticated
+  const currentUser = auth.currentUser;
+
+  if (currentUser) {
+    redirect("/dashboard");
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
