@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { getFirestore, doc, updateDoc, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore, doc, updateDoc, getDoc, setDoc, getDocs, collection } from 'firebase/firestore';
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from 'firebase/functions';
 
 const firebaseConfig = {
@@ -52,8 +52,37 @@ export const signIn = async (email: string, password: string) => {
     // Wait a moment for the customer record to be fully created
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Check subscription status
-    const { subscription, error: subError } = await getSubscriptionStatus(user.uid);
+    // Check subscription status in subcollection first
+    const customerRef = doc(db, 'customers', user.uid);
+    const subscriptionsSnapshot = await getDocs(collection(customerRef, 'subscriptions'));
+    
+    let subscription = null;
+    let subError = null;
+
+    if (!subscriptionsSnapshot.empty) {
+      // Get the latest subscription
+      const latestSubscription = subscriptionsSnapshot.docs[0].data();
+      const currentPeriodEnd = latestSubscription.currentPeriodEnd?.toDate();
+      const isExpired = currentPeriodEnd ? currentPeriodEnd < new Date() : true;
+      
+      if (latestSubscription.status === 'active' && !isExpired) {
+        subscription = {
+          status: latestSubscription.status,
+          priceId: latestSubscription.priceId,
+          currentPeriodEnd: currentPeriodEnd?.toISOString(),
+          isExpired
+        };
+      }
+    }
+
+    // If no active subscription found in subcollection, check root document
+    if (!subscription) {
+      const { subscription: rootSubscription, error: rootError } = await getSubscriptionStatus(user.uid);
+      if (rootSubscription?.status === 'active' && !rootSubscription.isExpired) {
+        subscription = rootSubscription;
+      }
+      subError = rootError;
+    }
     
     if (subError) {
       console.error('Error checking subscription:', subError);
@@ -366,9 +395,41 @@ export const signInWithGoogle = async () => {
     // Wait a moment for the document to be fully created
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Check subscription status
-    console.log('Checking subscription status...');
-    const { subscription, error: subError } = await getSubscriptionStatus(user.uid);
+    // Check subscription status in subcollection first
+    console.log('Checking subscription status in subcollection...');
+    const customerRef = doc(db, 'customers', user.uid);
+    const subscriptionsSnapshot = await getDocs(collection(customerRef, 'subscriptions'));
+    
+    let subscription = null;
+    let subError = null;
+
+    if (!subscriptionsSnapshot.empty) {
+      // Get the latest subscription
+      const latestSubscription = subscriptionsSnapshot.docs[0].data();
+      const currentPeriodEnd = latestSubscription.currentPeriodEnd?.toDate();
+      const isExpired = currentPeriodEnd ? currentPeriodEnd < new Date() : true;
+      
+      if (latestSubscription.status === 'active' && !isExpired) {
+        subscription = {
+          status: latestSubscription.status,
+          priceId: latestSubscription.priceId,
+          currentPeriodEnd: currentPeriodEnd?.toISOString(),
+          isExpired
+        };
+        console.log('Found active subscription in subcollection:', subscription);
+      }
+    }
+
+    // If no active subscription found in subcollection, check root document
+    if (!subscription) {
+      console.log('No active subscription in subcollection, checking root document...');
+      const { subscription: rootSubscription, error: rootError } = await getSubscriptionStatus(user.uid);
+      if (rootSubscription?.status === 'active' && !rootSubscription.isExpired) {
+        subscription = rootSubscription;
+        console.log('Found active subscription in root document:', subscription);
+      }
+      subError = rootError;
+    }
     
     if (subError) {
       console.error('Error checking subscription:', subError);
