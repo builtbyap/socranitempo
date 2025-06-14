@@ -40,11 +40,10 @@ export default function Navbar() {
           </Link>
           {user ? (
             <>
-              <Link
-                href="/dashboard"
-                className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900"
-              >
-                <Button>Dashboard</Button>
+              <Link href="/dashboard">
+                <Button variant="default" className="font-medium">
+                  Dashboard
+                </Button>
               </Link>
               <UserProfile />
             </>
