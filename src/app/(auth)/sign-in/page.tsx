@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { signInWithGoogle, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import Link from 'next/link';
 
 function SignInForm() {
+  const router = useRouter();
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -33,14 +35,14 @@ function SignInForm() {
           if (isActive) {
             console.log('User has active subscription, redirecting to dashboard...');
             setIsRedirecting(true);
-            window.location.href = '/dashboard';
+            router.push('/dashboard');
             return;
           }
         }
         
         console.log('No active subscription, redirecting to pricing page...');
         setIsRedirecting(true);
-        window.location.href = '/pricing';
+        router.push('/pricing');
       } else {
         console.error('Sign-in failed:', error);
         setError(error || 'Failed to sign in with Google');
