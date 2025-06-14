@@ -25,21 +25,28 @@ function SignInForm() {
     try {
       const { success, error, subscription } = await signInWithGoogle();
       console.log('Sign-in result:', { success, error, subscription });
+      
       if (success) {
+        // Wait for Firebase Auth to be ready
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
         if (subscription) {
           const status = (subscription.status || '').toLowerCase();
           const isActive = status === 'active' && !subscription.isExpired;
           console.log('Subscription status:', status, 'Is active:', isActive, 'Subscription:', subscription);
+          
           if (isActive) {
             console.log('Redirecting to dashboard...');
             setIsRedirecting(true);
-            window.location.href = '/dashboard';
+            // Use router.replace for more reliable navigation
+            router.replace('/dashboard');
             return;
           }
         }
+        
         console.log('No active subscription, redirecting to payment', subscription);
         setIsRedirecting(true);
-        window.location.href = '/payment';
+        router.replace('/payment');
       } else {
         setError(error || 'Failed to sign in with Google');
       }
