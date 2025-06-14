@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/firebase';
 import { getStripe } from '@/lib/stripe';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import Stripe from 'stripe';
 
 // Define the response type for the getCustomerId function
 interface CustomerIdResponse {
@@ -32,15 +31,8 @@ export async function POST(req: Request) {
     }
 
     // Create a Stripe Customer Portal session
-    const stripe = await getStripe();
-    if (!stripe) {
-      return NextResponse.json(
-        { error: 'Failed to initialize Stripe' },
-        { status: 500 }
-      );
-    }
-
-    const session = await (stripe as unknown as Stripe).billingPortal.sessions.create({
+    const stripe = getStripe();
+    const session = await stripe.billingPortal.sessions.create({
       customer: data.customerId,
       return_url: `${req.headers.get('origin')}/payment`,
     });

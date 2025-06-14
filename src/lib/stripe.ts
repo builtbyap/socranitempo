@@ -1,5 +1,14 @@
 import { functions } from "@/lib/firebase";
 import { httpsCallable } from "firebase/functions";
+import Stripe from 'stripe';
+
+// Initialize Stripe with the secret key
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2023-10-16',
+});
+
+// Export a singleton instance of Stripe
+export const getStripe = () => stripe;
 
 // Function to create a payment intent
 export async function createPaymentIntent({
