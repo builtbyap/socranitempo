@@ -1,15 +1,23 @@
+"use client";
+
 import Link from "next/link";
-import { createClient } from "../../supabase/server";
 import { Button } from "./ui/button";
 import { User, UserCircle } from "lucide-react";
 import UserProfile from "./user-profile";
+import { auth } from "@/lib/firebase";
+import { useEffect, useState } from "react";
+import { User as FirebaseUser } from "firebase/auth";
 
-export default async function Navbar() {
-  const supabase = createClient();
+export default function Navbar() {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
 
-  const {
-    data: { user },
-  } = await (await supabase).auth.getUser();
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setUser(user);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   return (
     <nav className="w-full border-b border-gray-200 bg-white py-2">

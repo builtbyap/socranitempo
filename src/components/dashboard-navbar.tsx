@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { createClient } from "../../supabase/client";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,10 +10,20 @@ import {
 import { Button } from "./ui/button";
 import { UserCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { auth } from "@/lib/firebase";
+import { signOut } from "firebase/auth";
 
 export default function DashboardNavbar() {
-  const supabase = createClient();
   const router = useRouter();
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      router.push("/sign-in");
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
+  };
 
   return (
     <nav className="w-full border-b border-gray-200 bg-white py-4">
@@ -32,12 +41,7 @@ export default function DashboardNavbar() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={async () => {
-                  await supabase.auth.signOut();
-                  router.refresh();
-                }}
-              >
+              <DropdownMenuItem onClick={handleSignOut}>
                 Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>

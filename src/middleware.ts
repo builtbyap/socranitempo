@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { auth } from "@/lib/firebase";
 
 export function middleware(req: NextRequest) {
   const url = req.nextUrl.clone();
 
-  // Only check for a session cookie or header (no Firestore, no firebase-admin)
-  const hasSession = req.cookies.get("yourSessionCookieName") || req.headers.get("authorization");
-  if (url.pathname.startsWith("/dashboard") && !hasSession) {
+  // Check for Firebase auth token
+  const authToken = req.cookies.get("__session")?.value;
+  
+  if (url.pathname.startsWith("/dashboard") && !authToken) {
     url.pathname = "/sign-in";
     return NextResponse.redirect(url);
   }
