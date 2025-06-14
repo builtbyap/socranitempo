@@ -38,9 +38,9 @@ function SignInForm() {
           }
         }
         
-        console.log('No active subscription, redirecting to payment...');
+        console.log('No active subscription, redirecting to pricing page...');
         setIsRedirecting(true);
-        window.location.href = '/payment';
+        window.location.href = '/pricing';
       } else {
         console.error('Sign-in failed:', error);
         setError(error || 'Failed to sign in with Google');
