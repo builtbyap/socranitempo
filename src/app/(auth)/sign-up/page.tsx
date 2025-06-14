@@ -1,17 +1,30 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { signInWithGoogle } from '@/lib/firebase';
+import { signInWithGoogle, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import Link from 'next/link';
 import Navbar from '@/components/navbar';
+import { onAuthStateChanged } from 'firebase/auth';
 
 function SignUpForm() {
   const router = useRouter();
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Check if user is already authenticated
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        console.log('User already authenticated, redirecting to dashboard');
+        router.push('/dashboard');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
 
   const handleGoogleSignUp = async () => {
     setError('');
@@ -20,14 +33,17 @@ function SignUpForm() {
       const { success, error, subscription } = await signInWithGoogle();
       if (success) {
         if (subscription?.status === 'active') {
+          console.log('User has active subscription, redirecting to dashboard');
           router.push('/dashboard');
         } else {
+          console.log('No active subscription, redirecting to payment');
           router.push('/payment');
         }
       } else {
         setError(error || 'Failed to sign up with Google');
       }
     } catch (err) {
+      console.error('Sign up error:', err);
       setError('An unexpected error occurred');
     } finally {
       setIsLoading(false);
