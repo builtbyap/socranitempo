@@ -16,32 +16,35 @@ function SignInForm() {
 
   useEffect(() => {
     let isMounted = true;
-    let redirectTimeout: NodeJS.Timeout;
+    let authTimeout: NodeJS.Timeout;
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!isMounted) return;
 
       if (user) {
         console.log('User authenticated, preparing to redirect...');
+        setIsLoading(false);
         setIsRedirecting(true);
         
-        redirectTimeout = setTimeout(() => {
+        // Add a small delay to ensure state updates are complete
+        authTimeout = setTimeout(() => {
           if (isMounted) {
             console.log('Redirecting to dashboard...');
-            window.location.href = '/dashboard';
+            // Use replace instead of push to prevent back button issues
+            router.replace('/dashboard');
           }
-        }, 500);
+        }, 1000);
       }
     });
 
     return () => {
       isMounted = false;
-      if (redirectTimeout) {
-        clearTimeout(redirectTimeout);
+      if (authTimeout) {
+        clearTimeout(authTimeout);
       }
       unsubscribe();
     };
-  }, []);
+  }, [router]);
 
   const handleGoogleSignIn = async () => {
     if (isLoading || isRedirecting) return;
@@ -64,15 +67,17 @@ function SignInForm() {
 
   if (isRedirecting) {
     return (
-      <Card className="w-[350px]">
-        <CardHeader>
-          <CardTitle>Sign In</CardTitle>
-          <CardDescription>Redirecting to dashboard...</CardDescription>
-        </CardHeader>
-        <CardContent className="flex justify-center">
-          <div className="text-muted-foreground">Please wait...</div>
-        </CardContent>
-      </Card>
+      <div className="fixed inset-0 bg-background/80 backdrop-blur-sm">
+        <Card className="w-[350px] absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+          <CardHeader>
+            <CardTitle>Sign In</CardTitle>
+            <CardDescription>Redirecting to dashboard...</CardDescription>
+          </CardHeader>
+          <CardContent className="flex justify-center">
+            <div className="text-muted-foreground">Please wait...</div>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
