@@ -26,7 +26,6 @@ function SignUpForm() {
         console.log('User authenticated, preparing to redirect...');
         setIsRedirecting(true);
         
-        // Add a small delay before redirect to ensure state updates are complete
         redirectTimeout = setTimeout(() => {
           if (isMounted) {
             console.log('Redirecting to dashboard...');
@@ -52,15 +51,13 @@ function SignUpForm() {
     setIsLoading(true);
     try {
       const result = await signInWithGoogle();
-      
       if (!result.success) {
         setError(result.error || 'Failed to sign up with Google');
-        setIsLoading(false);
       }
-      // Don't redirect here - let the auth state listener handle it
     } catch (err) {
       console.error('Sign up error:', err);
       setError('An unexpected error occurred');
+    } finally {
       setIsLoading(false);
     }
   };
@@ -83,7 +80,7 @@ function SignUpForm() {
     <Card className="w-[350px]">
       <CardHeader>
         <CardTitle>Sign Up</CardTitle>
-        <CardDescription>Create an account using Google</CardDescription>
+        <CardDescription>Create your account using Google</CardDescription>
       </CardHeader>
       <CardContent>
         <Button 

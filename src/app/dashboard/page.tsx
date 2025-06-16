@@ -27,7 +27,7 @@ export default function Dashboard() {
         setIsRedirecting(true);
         redirectTimeout = setTimeout(() => {
           if (isMounted) {
-            window.location.href = "/sign-in";
+            router.push("/sign-in");
           }
         }, 500);
         return;
@@ -45,7 +45,7 @@ export default function Dashboard() {
           setIsRedirecting(true);
           redirectTimeout = setTimeout(() => {
             if (isMounted) {
-              window.location.href = "/pricing";
+              router.push("/pricing");
             }
           }, 500);
           return;
@@ -59,7 +59,7 @@ export default function Dashboard() {
           setIsRedirecting(true);
           redirectTimeout = setTimeout(() => {
             if (isMounted) {
-              window.location.href = "/pricing";
+              router.push("/pricing");
             }
           }, 500);
           return;
@@ -106,7 +106,7 @@ export default function Dashboard() {
           setIsRedirecting(true);
           redirectTimeout = setTimeout(() => {
             if (isMounted) {
-              window.location.href = "/pricing";
+              router.push("/pricing");
             }
           }, 500);
           return;
@@ -129,7 +129,7 @@ export default function Dashboard() {
           setIsRedirecting(true);
           redirectTimeout = setTimeout(() => {
             if (isMounted) {
-              window.location.href = "/pricing";
+              router.push("/pricing");
             }
           }, 500);
           return;
@@ -149,7 +149,7 @@ export default function Dashboard() {
         setIsRedirecting(true);
         redirectTimeout = setTimeout(() => {
           if (isMounted) {
-            window.location.href = "/pricing";
+            router.push("/pricing");
           }
         }, 500);
       }
@@ -162,7 +162,7 @@ export default function Dashboard() {
       }
       unsubscribe();
     };
-  }, []);
+  }, [router]);
 
   if (isRedirecting) {
     return (
