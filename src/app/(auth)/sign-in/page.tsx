@@ -16,16 +16,33 @@ function SignInForm() {
 
   // Check if user is already authenticated
   useEffect(() => {
+    let isMounted = true;
+    let redirectTimeout: NodeJS.Timeout;
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (!isMounted) return;
+
       if (user) {
-        console.log('User authenticated, redirecting to dashboard...');
+        console.log('User authenticated, preparing to redirect...');
         setIsRedirecting(true);
-        // Use window.location for a full page reload to ensure proper state
-        window.location.href = '/dashboard';
+        
+        // Add a small delay before redirect to ensure state updates are complete
+        redirectTimeout = setTimeout(() => {
+          if (isMounted) {
+            console.log('Redirecting to dashboard...');
+            window.location.href = '/dashboard';
+          }
+        }, 500);
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      if (redirectTimeout) {
+        clearTimeout(redirectTimeout);
+      }
+      unsubscribe();
+    };
   }, []);
 
   const handleGoogleSignIn = async () => {
@@ -38,12 +55,12 @@ function SignInForm() {
       
       if (!success) {
         setError(error || 'Failed to sign in with Google');
+        setIsLoading(false);
       }
       // Don't redirect here - let the auth state listener handle it
     } catch (err) {
       console.error('Sign in error:', err);
       setError('An unexpected error occurred');
-    } finally {
       setIsLoading(false);
     }
   };
