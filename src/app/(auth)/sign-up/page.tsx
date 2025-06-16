@@ -15,26 +15,35 @@ function SignUpForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
 
-  // Check if user is already authenticated
   useEffect(() => {
     let isMounted = true;
+    let redirectTimeout: NodeJS.Timeout;
 
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (!isMounted) return;
 
       if (user) {
-        console.log('User authenticated, redirecting to dashboard...');
+        console.log('User authenticated, preparing to redirect...');
         setIsRedirecting(true);
-        // Use window.location for a full page reload to ensure proper state
-        window.location.href = '/dashboard';
+        
+        // Add a small delay before redirect to ensure state updates are complete
+        redirectTimeout = setTimeout(() => {
+          if (isMounted) {
+            console.log('Redirecting to dashboard...');
+            router.push('/dashboard');
+          }
+        }, 500);
       }
     });
 
     return () => {
       isMounted = false;
+      if (redirectTimeout) {
+        clearTimeout(redirectTimeout);
+      }
       unsubscribe();
     };
-  }, []);
+  }, [router]);
 
   const handleGoogleSignUp = async () => {
     if (isLoading || isRedirecting) return;
@@ -42,15 +51,16 @@ function SignUpForm() {
     setError('');
     setIsLoading(true);
     try {
-      const { success, error } = await signInWithGoogle();
-      if (!success) {
-        setError(error || 'Failed to sign up with Google');
+      const result = await signInWithGoogle();
+      
+      if (!result.success) {
+        setError(result.error || 'Failed to sign up with Google');
+        setIsLoading(false);
       }
       // Don't redirect here - let the auth state listener handle it
     } catch (err) {
       console.error('Sign up error:', err);
       setError('An unexpected error occurred');
-    } finally {
       setIsLoading(false);
     }
   };
@@ -73,7 +83,7 @@ function SignUpForm() {
     <Card className="w-[350px]">
       <CardHeader>
         <CardTitle>Sign Up</CardTitle>
-        <CardDescription>Create your account using Google</CardDescription>
+        <CardDescription>Create an account using Google</CardDescription>
       </CardHeader>
       <CardContent>
         <Button 
