@@ -30,10 +30,10 @@ function SignInForm() {
         authTimeout = setTimeout(() => {
           if (isMounted) {
             console.log('Redirecting to dashboard...');
-            // Use replace instead of push to prevent back button issues
-            router.replace('/dashboard');
+            // Use window.location for a full page reload to ensure proper state
+            window.location.href = '/dashboard';
           }
-        }, 1000);
+        }, 500);
       }
     });
 
@@ -44,7 +44,7 @@ function SignInForm() {
       }
       unsubscribe();
     };
-  }, [router]);
+  }, []);
 
   const handleGoogleSignIn = async () => {
     if (isLoading || isRedirecting) return;
