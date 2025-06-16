@@ -28,7 +28,7 @@ function SignInForm() {
         redirectTimeout = setTimeout(() => {
           if (isMounted) {
             console.log('Redirecting to dashboard...');
-            router.push('/dashboard');
+            window.location.href = '/dashboard';
           }
         }, 500);
       }
@@ -41,7 +41,7 @@ function SignInForm() {
       }
       unsubscribe();
     };
-  }, [router]);
+  }, []);
 
   const handleGoogleSignIn = async () => {
     if (isLoading || isRedirecting) return;

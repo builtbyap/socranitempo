@@ -19,36 +19,17 @@ export default function Dashboard() {
     let isMounted = true;
     let redirectTimeout: NodeJS.Timeout;
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!isMounted) return;
-
-      if (!user) {
-        console.log("No user found, redirecting to sign-in");
-        setIsRedirecting(true);
-        redirectTimeout = setTimeout(() => {
-          if (isMounted) {
-            router.push("/sign-in");
-          }
-        }, 500);
-        return;
-      }
-
+    const checkSubscription = async (user: any) => {
       try {
         console.log("Checking subscription for user:", user.uid);
         const customerRef = doc(db, "customers", user.uid);
         const customerDoc = await getDoc(customerRef);
         
-        if (!isMounted) return;
+        if (!isMounted) return false;
 
         if (!customerDoc.exists()) {
           console.log("No customer document found for user:", user.uid);
-          setIsRedirecting(true);
-          redirectTimeout = setTimeout(() => {
-            if (isMounted) {
-              router.push("/pricing");
-            }
-          }, 500);
-          return;
+          return false;
         }
 
         const customerData = customerDoc.data();
@@ -56,13 +37,7 @@ export default function Dashboard() {
 
         if (!customerData) {
           console.log("Customer data is null or undefined");
-          setIsRedirecting(true);
-          redirectTimeout = setTimeout(() => {
-            if (isMounted) {
-              router.push("/pricing");
-            }
-          }, 500);
-          return;
+          return false;
         }
 
         // Check for subscription data in various possible locations
@@ -71,7 +46,7 @@ export default function Dashboard() {
 
         // First, try to find the subscription data in the subscriptions subcollection
         const subscriptionsSnapshot = await getDocs(collection(customerRef, 'subscriptions'));
-        if (!isMounted) return;
+        if (!isMounted) return false;
 
         if (!subscriptionsSnapshot.empty) {
           const latestSubscription = subscriptionsSnapshot.docs[0].data();
@@ -95,7 +70,7 @@ export default function Dashboard() {
           }
         }
 
-        if (!isMounted) return;
+        if (!isMounted) return false;
 
         if (!subscriptionStatus) {
           console.log("No valid subscription status found in customer data");
@@ -103,13 +78,7 @@ export default function Dashboard() {
           if (subscriptionData) {
             console.log("Subscription object fields:", Object.keys(subscriptionData));
           }
-          setIsRedirecting(true);
-          redirectTimeout = setTimeout(() => {
-            if (isMounted) {
-              router.push("/pricing");
-            }
-          }, 500);
-          return;
+          return false;
         }
 
         // Normalize the status to lowercase for comparison
@@ -122,23 +91,17 @@ export default function Dashboard() {
           ? new Date(subscriptionData.currentPeriodEnd.toDate()) < new Date()
           : false;
 
-        if (!isMounted) return;
+        if (!isMounted) return false;
 
         if (!isActive || isExpired) {
           console.log("Subscription not active or expired. Status:", normalizedStatus, "Expired:", isExpired);
-          setIsRedirecting(true);
-          redirectTimeout = setTimeout(() => {
-            if (isMounted) {
-              router.push("/pricing");
-            }
-          }, 500);
-          return;
+          return false;
         }
 
         console.log("Subscription is active and valid, allowing access to dashboard");
-        setIsLoading(false);
+        return true;
       } catch (error) {
-        if (!isMounted) return;
+        if (!isMounted) return false;
         
         console.error("Error checking subscription:", error);
         if (error instanceof Error) {
@@ -146,13 +109,39 @@ export default function Dashboard() {
           console.error("Error stack:", error.stack);
         }
         setError("Error checking subscription status");
+        return false;
+      }
+    };
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!isMounted) return;
+
+      if (!user) {
+        console.log("No user found, redirecting to sign-in");
         setIsRedirecting(true);
         redirectTimeout = setTimeout(() => {
           if (isMounted) {
-            router.push("/pricing");
+            window.location.href = "/sign-in";
           }
         }, 500);
+        return;
       }
+
+      const hasValidSubscription = await checkSubscription(user);
+      
+      if (!isMounted) return;
+
+      if (!hasValidSubscription) {
+        setIsRedirecting(true);
+        redirectTimeout = setTimeout(() => {
+          if (isMounted) {
+            window.location.href = "/pricing";
+          }
+        }, 500);
+        return;
+      }
+
+      setIsLoading(false);
     });
 
     return () => {
@@ -162,7 +151,7 @@ export default function Dashboard() {
       }
       unsubscribe();
     };
-  }, [router]);
+  }, []);
 
   if (isRedirecting) {
     return (
