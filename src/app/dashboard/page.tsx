@@ -155,24 +155,30 @@ export default function Dashboard() {
 
   if (isRedirecting) {
     return (
-      <div className="container flex h-screen w-screen flex-col items-center justify-center">
-        <div className="text-lg">Redirecting...</div>
+      <div className="fixed inset-0 bg-background/80 backdrop-blur-sm">
+        <div className="container flex h-screen w-screen flex-col items-center justify-center">
+          <div className="text-lg">Redirecting...</div>
+        </div>
       </div>
     );
   }
 
   if (isLoading) {
     return (
-      <div className="container flex h-screen w-screen flex-col items-center justify-center">
-        <div className="text-lg">Loading dashboard...</div>
+      <div className="fixed inset-0 bg-background/80 backdrop-blur-sm">
+        <div className="container flex h-screen w-screen flex-col items-center justify-center">
+          <div className="text-lg">Loading dashboard...</div>
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="container flex h-screen w-screen flex-col items-center justify-center">
-        <div className="text-red-500">{error}</div>
+      <div className="fixed inset-0 bg-background/80 backdrop-blur-sm">
+        <div className="container flex h-screen w-screen flex-col items-center justify-center">
+          <div className="text-red-500">{error}</div>
+        </div>
       </div>
     );
   }
