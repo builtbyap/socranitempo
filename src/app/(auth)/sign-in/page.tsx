@@ -1,28 +1,45 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { signInWithGoogle } from '@/lib/firebase';
+import { signInWithGoogle, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import Link from 'next/link';
+import { onAuthStateChanged } from 'firebase/auth';
 
 function SignInForm() {
   const router = useRouter();
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  // Check if user is already authenticated
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        console.log('User authenticated, redirecting to dashboard...');
+        setIsRedirecting(true);
+        // Use window.location for a full page reload to ensure proper state
+        window.location.href = '/dashboard';
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const handleGoogleSignIn = async () => {
+    if (isLoading || isRedirecting) return;
+    
     setError('');
     setIsLoading(true);
     try {
       const { success, error } = await signInWithGoogle();
       
-      if (success) {
-        router.push('/dashboard');
-      } else {
+      if (!success) {
         setError(error || 'Failed to sign in with Google');
       }
+      // Don't redirect here - let the auth state listener handle it
     } catch (err) {
       console.error('Sign in error:', err);
       setError('An unexpected error occurred');
@@ -30,6 +47,20 @@ function SignInForm() {
       setIsLoading(false);
     }
   };
+
+  if (isRedirecting) {
+    return (
+      <Card className="w-[350px]">
+        <CardHeader>
+          <CardTitle>Sign In</CardTitle>
+          <CardDescription>Redirecting to dashboard...</CardDescription>
+        </CardHeader>
+        <CardContent className="flex justify-center">
+          <div className="text-muted-foreground">Please wait...</div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-[350px]">
@@ -40,7 +71,7 @@ function SignInForm() {
       <CardContent>
         <Button 
           onClick={handleGoogleSignIn} 
-          disabled={isLoading} 
+          disabled={isLoading || isRedirecting} 
           className="w-full"
         >
           {isLoading ? 'Signing in...' : 'Sign in with Google'}

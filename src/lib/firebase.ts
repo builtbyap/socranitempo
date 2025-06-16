@@ -397,118 +397,57 @@ export const getFirebaseSubscription = async (userId: string) => {
 
 export const signInWithGoogle = async () => {
   try {
-    console.log('Starting Google sign-in process...');
     const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({
+      prompt: 'select_account'
+    });
+
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
-    console.log('Google sign-in successful for user:', user.uid);
 
-    if (!user.email) {
-      console.error('No email provided by Google sign-in');
-      return {
-        success: false,
-        error: 'No email provided by Google sign-in'
-      };
+    if (!user || !user.email) {
+      console.error('No user or email after Google sign-in');
+      return { success: false, error: 'Failed to get user information' };
     }
 
-    // Create customer record using Cloud Function
-    console.log('Creating customer record...');
+    console.log('Google sign-in successful, creating customer record...');
+
+    // Create customer record
     const { success: createSuccess, error: createError } = await createCustomer(user.uid, user.email);
     if (!createSuccess) {
-      console.error('Error creating customer record:', createError);
-      return { 
-        success: false, 
-        error: 'Failed to create customer record',
-        details: createError
-      };
+      console.error('Error creating customer:', createError);
+      return { success: false, error: 'Failed to create customer record' };
     }
 
-    // Wait a moment for the document to be fully created
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Check subscription status in subcollection first
-    console.log('Checking subscription status in subcollection...');
-    const customerRef = doc(db, 'customers', user.uid);
-    const subscriptionsSnapshot = await getDocs(collection(customerRef, 'subscriptions'));
+    console.log('Customer record created successfully');
     
-    let subscription = null;
-    let subError = null;
-
-    if (!subscriptionsSnapshot.empty) {
-      // Get the latest subscription
-      const latestSubscription = subscriptionsSnapshot.docs[0].data();
-      const currentPeriodEnd = latestSubscription.currentPeriodEnd?.toDate();
-      const isExpired = currentPeriodEnd ? currentPeriodEnd < new Date() : true;
-      
-      if (latestSubscription.status === 'active' && !isExpired) {
-        subscription = {
-          status: latestSubscription.status,
-          priceId: latestSubscription.priceId,
-          currentPeriodEnd: currentPeriodEnd?.toISOString(),
-          isExpired
-        };
-        console.log('Found active subscription in subcollection:', subscription);
-      }
-    }
-
-    // If no active subscription found in subcollection, check root document
-    if (!subscription) {
-      console.log('No active subscription in subcollection, checking root document...');
-      const { subscription: rootSubscription, error: rootError } = await getSubscriptionStatus(user.uid);
-      if (rootSubscription?.status === 'active' && !rootSubscription.isExpired) {
-        subscription = rootSubscription;
-        console.log('Found active subscription in root document:', subscription);
-      }
-      subError = rootError;
-    }
-    
-    if (subError) {
-      console.error('Error checking subscription:', subError);
-      // Don't fail the sign-in if subscription check fails
-      console.log('Continuing sign-in despite subscription check error');
-    }
-
-    // If no subscription exists, create a checkout session
-    if (!subscription) {
-      console.log('No subscription found, creating checkout session...');
-      const createCheckoutSession = httpsCallable<{ priceId: string }, { sessionId: string }>(
-        functions,
-        'ext-firestore-stripe-payments-createCheckoutSession'
-      );
-
-      try {
-        const { data: sessionData } = await createCheckoutSession({ 
-          priceId: 'price_1RMyDuCyTrsNmVMYSACvTMhw' // Monthly plan price ID
-        });
-
-        if (sessionData?.sessionId) {
-          console.log('Checkout session created, redirecting to Stripe...');
-          // Redirect to Stripe Checkout
-          window.location.href = `https://checkout.stripe.com/pay/${sessionData.sessionId}`;
-          return {
-            success: true,
-            user,
-            subscription: null,
-            redirecting: true
-          };
-        }
-      } catch (error) {
-        console.error('Error creating checkout session:', error);
-        // Continue with sign-in even if checkout session creation fails
-      }
-    }
-
-    return {
+    return { 
       success: true,
-      user,
-      subscription: subscription || null
+      user: {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName
+      }
     };
   } catch (error: any) {
     console.error('Error signing in with Google:', error);
-    return { 
-      success: false, 
-      error: error.message || 'Failed to sign in with Google',
-      details: error
-    };
+    let errorMessage = 'Failed to sign in with Google';
+    
+    switch (error.code) {
+      case 'auth/popup-closed-by-user':
+        errorMessage = 'Sign-in popup was closed before completing the sign-in';
+        break;
+      case 'auth/cancelled-popup-request':
+        errorMessage = 'Sign-in was cancelled';
+        break;
+      case 'auth/popup-blocked':
+        errorMessage = 'Sign-in popup was blocked by the browser';
+        break;
+      case 'auth/network-request-failed':
+        errorMessage = 'Network error occurred during sign-in';
+        break;
+    }
+    
+    return { success: false, error: errorMessage };
   }
 }; 
