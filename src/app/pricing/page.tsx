@@ -4,71 +4,8 @@ import Navbar from "@/components/navbar";
 import { Button } from "@/components/ui/button";
 import { Check } from "lucide-react";
 import Link from "next/link";
-import { auth } from "@/lib/firebase/auth";
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { useState } from "react";
-
-const handleSubscribe = async (priceId: string) => {
-  try {
-    const user = auth.currentUser;
-    if (!user) {
-      alert("Please sign in to subscribe");
-      return;
-    }
-
-    console.log("Creating checkout session for user:", user.uid);
-    console.log("Price ID:", priceId);
-
-    // Validate price ID format
-    if (!priceId.startsWith("price_")) {
-      throw new Error("Invalid price ID format");
-    }
-
-    // Initialize Firebase Functions
-    const functions = getFunctions();
-    const createCheckoutSession = httpsCallable(functions, 'createCheckoutSession');
-
-    // Call the function
-    const result = await createCheckoutSession({ priceId });
-    console.log("Checkout session result:", result);
-
-    const { url } = result.data as { url: string };
-
-    if (!url) {
-      console.error("No URL in response:", result.data);
-      throw new Error("No checkout URL received");
-    }
-
-    console.log("Redirecting to checkout:", url);
-    window.location.href = url;
-  } catch (error: any) {
-    console.error("Payment error:", error);
-    
-    // Handle specific Firebase error codes
-    if (error.code === 'functions/unauthenticated') {
-      alert("Please sign in to subscribe");
-    } else if (error.code === 'functions/invalid-argument') {
-      alert("Invalid price ID. Please try again.");
-    } else if (error.code === 'functions/failed-precondition') {
-      alert("Please make sure you have a valid email address in your account.");
-    } else {
-      alert(error.message || "An error occurred while processing your payment. Please try again.");
-    }
-  }
-};
 
 export default function PricingPage() {
-  const [loading, setLoading] = useState<string | null>(null);
-
-  const onSubscribe = async (priceId: string) => {
-    setLoading(priceId);
-    try {
-      await handleSubscribe(priceId);
-    } finally {
-      setLoading(null);
-    }
-  };
-
   return (
     <div className="py-24 sm:py-32">
       <div className="mx-auto max-w-7xl px-6 lg:px-8">
@@ -135,7 +72,7 @@ export default function PricingPage() {
               </ul>
             </div>
             <Link
-              href="/signup"
+              href="/sign-up"
               className="mt-8 block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
             >
               Get started today
@@ -201,15 +138,12 @@ export default function PricingPage() {
                 </li>
               </ul>
             </div>
-            <button
-              onClick={() => onSubscribe("price_1RYHRjCyTrsNmVMYWjpG3SDR")}
-              disabled={loading === "price_1RYHRjCyTrsNmVMYWjpG3SDR"}
-              className="mt-8 block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            <Link
+              href="/sign-up"
+              className="mt-8 block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
             >
-              {loading === "price_1RYHRjCyTrsNmVMYWjpG3SDR"
-                ? "Processing..."
-                : "Subscribe now"}
-            </button>
+              Get started today
+            </Link>
           </div>
 
           {/* Enterprise Plan */}
@@ -231,7 +165,7 @@ export default function PricingPage() {
                   $50
                 </span>
                 <span className="text-sm font-semibold leading-6 text-gray-600">
-                  /year
+                  /month
                 </span>
               </p>
               <ul
@@ -250,7 +184,7 @@ export default function PricingPage() {
                     className="h-6 w-5 flex-none text-indigo-600"
                     aria-hidden="true"
                   />
-                  Custom solutions
+                  Unlimited access
                 </li>
                 <li className="flex gap-x-3">
                   <Check
@@ -264,19 +198,16 @@ export default function PricingPage() {
                     className="h-6 w-5 flex-none text-indigo-600"
                     aria-hidden="true"
                   />
-                  Advanced analytics
+                  Custom solutions
                 </li>
               </ul>
             </div>
-            <button
-              onClick={() => onSubscribe("price_1RYHSoCyTrsNmVMYLMJl54HW")}
-              disabled={loading === "price_1RYHSoCyTrsNmVMYLMJl54HW"}
-              className="mt-8 block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            <Link
+              href="/sign-up"
+              className="mt-8 block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
             >
-              {loading === "price_1RYHSoCyTrsNmVMYLMJl54HW"
-                ? "Processing..."
-                : "Subscribe now"}
-            </button>
+              Get started today
+            </Link>
           </div>
         </div>
       </div>

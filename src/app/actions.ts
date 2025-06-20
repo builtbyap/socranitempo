@@ -25,8 +25,8 @@ export const signUpAction = async (formData: FormData) => {
   }
 
   if (user) {
-    // Redirect to payment page for new users
-    return redirect("/payment");
+    // Redirect to dashboard for new users
+    return redirect("/dashboard");
   }
 
   return redirect("/sign-up");
@@ -36,18 +36,13 @@ export const signInAction = async (formData: FormData) => {
   const email = formData.get("email") as string;
   const password = formData.get("password") as string;
 
-  const { success, error, subscription } = await signIn(email, password);
+  const { success, error } = await signIn(email, password);
 
   if (!success || error) {
     return encodedRedirect("error", "/sign-in", error || "Failed to sign in");
   }
 
-  // If user has no subscription, redirect to payment page
-  if (!subscription) {
-    return redirect("/payment");
-  }
-
-  // If user has an active subscription, redirect to dashboard
+  // Redirect to dashboard after successful sign-in
   return redirect("/dashboard");
 };
 
