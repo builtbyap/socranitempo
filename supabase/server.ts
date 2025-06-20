@@ -1,5 +1,5 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { getSubscriptionStatus } from "@/lib/firebase";
+// import { getSubscriptionStatus } from "@/lib/firebase";
 
 export const createClient = async () => {
   return createSupabaseClient(
