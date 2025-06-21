@@ -1,96 +1,31 @@
 "use client";
 
-import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { signInWithGoogle, auth } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import Link from 'next/link';
 import Navbar from '@/components/navbar';
-import { onAuthStateChanged } from 'firebase/auth';
 
 function SignUpForm() {
   const router = useRouter();
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isRedirecting, setIsRedirecting] = useState(false);
 
-  useEffect(() => {
-    let isMounted = true;
-    let redirectTimeout: NodeJS.Timeout;
-
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (!isMounted) return;
-
-      if (user) {
-        console.log('User authenticated, preparing to redirect...');
-        setIsRedirecting(true);
-        
-        redirectTimeout = setTimeout(() => {
-          if (isMounted) {
-            console.log('Redirecting to dashboard...');
-            router.push('/dashboard');
-          }
-        }, 500);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-      if (redirectTimeout) {
-        clearTimeout(redirectTimeout);
-      }
-      unsubscribe();
-    };
-  }, [router]);
-
-  const handleGoogleSignUp = async () => {
-    if (isLoading || isRedirecting) return;
-    
-    setError('');
-    setIsLoading(true);
-    try {
-      const result = await signInWithGoogle();
-      if (!result.success) {
-        setError(result.error || 'Failed to sign up with Google');
-      }
-    } catch (err) {
-      console.error('Sign up error:', err);
-      setError('An unexpected error occurred');
-    } finally {
-      setIsLoading(false);
-    }
+  const handleSignUp = () => {
+    router.push('/dashboard');
   };
-
-  if (isRedirecting) {
-    return (
-      <Card className="w-[350px]">
-        <CardHeader>
-          <CardTitle>Sign Up</CardTitle>
-          <CardDescription>Redirecting to dashboard...</CardDescription>
-        </CardHeader>
-        <CardContent className="flex justify-center">
-          <div className="text-muted-foreground">Please wait...</div>
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card className="w-[350px]">
       <CardHeader>
         <CardTitle>Sign Up</CardTitle>
-        <CardDescription>Create your account using Google</CardDescription>
+        <CardDescription>Click the button below to access your dashboard</CardDescription>
       </CardHeader>
       <CardContent>
         <Button 
-          onClick={handleGoogleSignUp} 
-          disabled={isLoading || isRedirecting} 
+          onClick={handleSignUp} 
           className="w-full"
         >
-          {isLoading ? 'Signing up...' : 'Sign up with Google'}
+          Go to Dashboard
         </Button>
-        {error && <div className="text-red-500 text-sm mt-4">{error}</div>}
       </CardContent>
       <CardFooter className="flex flex-col space-y-4">
         <div className="text-sm text-muted-foreground">
