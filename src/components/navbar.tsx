@@ -32,12 +32,6 @@ export default function Navbar() {
           >
             Features
           </Link>
-          <Link
-            href="/pricing"
-            className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900"
-          >
-            Pricing
-          </Link>
           {user ? (
             <>
               <Link href="/dashboard">

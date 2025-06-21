@@ -45,10 +45,6 @@ export type Database = {
           token_identifier?: string;
           updated_at?: string | null;
           user_id?: string | null;
-          subscription_status?: string | null;
-          subscription_type?: string | null;
-          subscription_start_date?: string | null;
-          subscription_end_date?: string | null;
         };
         Relationships: [];
       };
