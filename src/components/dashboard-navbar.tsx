@@ -10,19 +10,14 @@ import {
 import { Button } from "./ui/button";
 import { UserCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { auth } from "@/lib/firebase";
-import { signOut } from "firebase/auth";
+import { createClient } from "@/supabase/client";
+import { signOutAction } from "@/app/actions";
 
 export default function DashboardNavbar() {
   const router = useRouter();
 
   const handleSignOut = async () => {
-    try {
-      await signOut(auth);
-      router.push("/sign-in");
-    } catch (error) {
-      console.error("Error signing out:", error);
-    }
+    await signOutAction();
   };
 
   return (

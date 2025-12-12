@@ -4,20 +4,10 @@ import Link from "next/link";
 import { Button } from "./ui/button";
 import { User, UserCircle } from "lucide-react";
 import UserProfile from "./user-profile";
-import { auth } from "@/lib/firebase";
-import { useEffect, useState } from "react";
-import { User as FirebaseUser } from "firebase/auth";
+import { useUser } from "@/hooks/use-user";
 
 export default function Navbar() {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      setUser(user);
-    });
-
-    return () => unsubscribe();
-  }, []);
+  const { user } = useUser();
 
   return (
     <nav className="w-full border-b border-gray-200 bg-white py-2">

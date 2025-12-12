@@ -2,20 +2,11 @@
 import { UserCircle } from 'lucide-react'
 import { Button } from './ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
-import { useRouter } from 'next/navigation'
-import { auth } from '@/lib/firebase'
-import { signOut } from 'firebase/auth'
+import { signOutAction } from '@/app/actions'
 
 export default function UserProfile() {
-    const router = useRouter()
-
     const handleSignOut = async () => {
-        try {
-            await signOut(auth)
-            router.push('/sign-in')
-        } catch (error) {
-            console.error('Error signing out:', error)
-        }
+        await signOutAction()
     }
 
     return (

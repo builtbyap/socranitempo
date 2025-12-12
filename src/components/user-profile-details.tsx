@@ -1,6 +1,6 @@
 "use client";
 
-import { User } from "firebase/auth";
+import type { User } from "@supabase/supabase-js";
 import {
   Dialog,
   DialogContent,
@@ -24,12 +24,12 @@ export default function UserProfileDetails({ user }: UserProfileDetailsProps) {
       </div>
       <div>
         <h3 className="text-lg font-medium">User ID</h3>
-        <p className="text-sm text-muted-foreground">{user.uid}</p>
+        <p className="text-sm text-muted-foreground">{user.id}</p>
       </div>
       <div>
         <h3 className="text-lg font-medium">Email Verified</h3>
         <p className="text-sm text-muted-foreground">
-          {user.emailVerified ? "Yes" : "No"}
+          {user.email_confirmed_at ? "Yes" : "No"}
         </p>
       </div>
     </div>

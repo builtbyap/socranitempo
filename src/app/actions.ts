@@ -2,7 +2,7 @@
 
 import { encodedRedirect } from "@/utils/utils";
 import { redirect } from "next/navigation";
-import { signIn, signUp } from "@/lib/firebase";
+import { signIn, signUp, signOut as supabaseSignOut } from "@/lib/supabase/auth";
 
 export const signUpAction = async (formData: FormData) => {
   const email = formData.get("email")?.toString();
@@ -17,7 +17,7 @@ export const signUpAction = async (formData: FormData) => {
     );
   }
 
-  const { success, error, user } = await signUp(email, password);
+  const { success, error, user } = await signUp(email, password, fullName);
 
   if (!success || error) {
     console.error("Sign up error:", error);
@@ -47,7 +47,6 @@ export const signInAction = async (formData: FormData) => {
 };
 
 export const signOutAction = async () => {
-  const { logOut } = await import("@/lib/firebase");
-  await logOut();
+  await supabaseSignOut();
   return redirect("/sign-in");
 };

@@ -1,16 +1,15 @@
-import { auth } from "@/lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
 import { redirect } from "next/navigation";
 import Hero from "@/components/hero";
 import Navbar from "@/components/navbar";
 import { ArrowUpRight, CheckCircle2, Shield, Users, Zap } from 'lucide-react';
 import Link from "next/link";
+import { getUser } from "@/lib/supabase/auth";
 
 export default async function Home() {
   // Check if user is authenticated
-  const currentUser = auth.currentUser;
+  const { user } = await getUser();
 
-  if (currentUser) {
+  if (user) {
     redirect("/dashboard");
   }
 
