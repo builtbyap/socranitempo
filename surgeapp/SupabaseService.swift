@@ -12,9 +12,9 @@ import Foundation
 class SupabaseService {
     static let shared = SupabaseService()
     
-    // Supabase credentials
-    private let supabaseURL = "https://jlkebdnvjjdwedmbfqou.supabase.co"
-    private let supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impsa2ViZG52ampkd2VkbWJmcW91Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE0NzU5NjQsImV4cCI6MjA1NzA1MTk2NH0.0dyDFawIks508PffUcovXN-M8kaAOgomOhe5OiEal3o"
+    // Supabase credentials from Config.swift (gitignored)
+    private let supabaseURL = Config.supabaseURL
+    private let supabaseKey = Config.supabaseKey
     
     private init() {}
     
@@ -116,6 +116,199 @@ class SupabaseService {
         
         let decoder = JSONDecoder()
         return try decoder.decode([EmailContact].self, from: data)
+    }
+    
+    // MARK: - Insert Job Posts
+    func insertJobPosts(_ posts: [JobPost]) async throws {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/job_posts") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        
+        var successCount = 0
+        var errorMessages: [String] = []
+        
+        for (index, post) in posts.enumerated() {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("public", forHTTPHeaderField: "Accept-Profile")
+            request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+            
+            do {
+                let postData = try encoder.encode(post)
+                request.httpBody = postData
+                
+                let (data, response) = try await URLSession.shared.data(for: request)
+                
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    errorMessages.append("Post \(index + 1): Invalid response")
+                    continue
+                }
+                
+                if (200...299).contains(httpResponse.statusCode) {
+                    successCount += 1
+                } else {
+                    let errorData = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    errorMessages.append("Post \(index + 1): HTTP \(httpResponse.statusCode) - \(errorData)")
+                    print("❌ Failed to insert post \(index + 1): HTTP \(httpResponse.statusCode) - \(errorData)")
+                }
+            } catch {
+                errorMessages.append("Post \(index + 1): \(error.localizedDescription)")
+                print("❌ Error encoding/inserting post \(index + 1): \(error)")
+            }
+        }
+        
+        print("✅ Successfully inserted \(successCount) out of \(posts.count) job posts")
+        
+        if successCount == 0 && !errorMessages.isEmpty {
+            throw SupabaseError.httpError(
+                statusCode: 0,
+                message: "Failed to insert any posts. First error: \(errorMessages.first ?? "Unknown")"
+            )
+        }
+    }
+    
+    // MARK: - Insert Email Contact
+    func insertEmailContact(_ contact: EmailContact) async throws {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/emails") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("public", forHTTPHeaderField: "Accept-Profile")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let contactData = try encoder.encode(contact)
+        request.httpBody = contactData
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw SupabaseError.requestFailed
+        }
+    }
+    
+    // MARK: - Insert LinkedIn Profiles
+    func insertLinkedInProfiles(_ profiles: [LinkedInProfile]) async throws {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/profiles") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        let encoder = JSONEncoder()
+        
+        for profile in profiles {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("public", forHTTPHeaderField: "Accept-Profile")
+            request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+            
+            let profileData = try encoder.encode(profile)
+            request.httpBody = profileData
+            
+            let (_, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                // Continue with next profile even if one fails
+                continue
+            }
+        }
+    }
+    
+    // MARK: - Applications
+    func fetchApplications() async throws -> [Application] {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/applications?select=*&order=applied_date.desc") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("public", forHTTPHeaderField: "Accept-Profile")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SupabaseError.requestFailed
+        }
+        
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw SupabaseError.httpError(statusCode: httpResponse.statusCode, message: errorMessage)
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode([Application].self, from: data)
+    }
+    
+    func insertApplication(_ application: Application) async throws {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/applications") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("public", forHTTPHeaderField: "Accept-Profile")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let applicationData = try encoder.encode(application)
+        request.httpBody = applicationData
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw SupabaseError.httpError(statusCode: httpResponse.statusCode, message: "Failed to insert application: \(errorMessage)")
+        }
     }
 }
 

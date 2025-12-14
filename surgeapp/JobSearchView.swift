@@ -9,11 +9,15 @@ import SwiftUI
 
 struct JobSearchView: View {
     @State private var jobPosts: [JobPost] = []
+    @State private var swipeablePosts: [JobPost] = [] // Posts available for swiping
     @State private var savedPostIds: Set<String> = []
     @State private var loading = false
     @State private var error: String?
     @State private var searchQuery = ""
     @State private var selectedTab = 0
+    @State private var showSearchForm = false
+    @State private var showApplicationSuccess = false
+    @State private var appliedJobTitle: String = ""
     
     var savedPosts: [JobPost] {
         jobPosts.filter { savedPostIds.contains($0.id) }
@@ -82,23 +86,65 @@ struct JobSearchView: View {
                     }
                     Spacer()
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 16) {
-                            ForEach(filteredPosts) { post in
-                                JobPostCard(post: post, isSaved: savedPostIds.contains(post.id)) {
-                                    toggleSave(post: post)
+                    if selectedTab == 0 {
+                        // Swipeable card stack for "All Jobs"
+                        GeometryReader { geometry in
+                            ZStack {
+                                ForEach(Array(swipeablePosts.enumerated()), id: \.element.id) { index, post in
+                                    if index < 3 { // Show max 3 cards at once
+                                        SwipeableJobCardView(
+                                            post: post,
+                                            onApply: {
+                                                applyToJob(post: post)
+                                            },
+                                            onPass: {
+                                                passJob(post: post)
+                                            }
+                                        )
+                                        .zIndex(Double(swipeablePosts.count - index))
+                                        .offset(y: CGFloat(index) * 8)
+                                        .scaleEffect(1.0 - CGFloat(index) * 0.03)
+                                        .opacity(index == 0 ? 1.0 : 0.95)
+                                    }
+                                }
+                                
+                                if swipeablePosts.isEmpty {
+                                    VStack(spacing: 16) {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .font(.system(size: 60))
+                                            .foregroundColor(.green)
+                                        Text("You've reviewed all jobs!")
+                                            .font(.headline)
+                                        Text("Pull down to refresh or search for more jobs")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                            .multilineTextAlignment(.center)
+                                    }
+                                    .padding()
                                 }
                             }
+                            .frame(width: geometry.size.width, height: geometry.size.height)
                         }
                         .padding()
+                    } else {
+                        // List view for "Saved Jobs"
+                        ScrollView {
+                            LazyVStack(spacing: 20) {
+                                ForEach(filteredPosts) { post in
+                                    JobPostCard(post: post, isSaved: savedPostIds.contains(post.id)) {
+                                        toggleSave(post: post)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                        }
                     }
                 }
                 
                 // Action Button
                 Button(action: {
-                    if let url = URL(string: "https://n8n.socrani.com/form/job-search-form") {
-                        UIApplication.shared.open(url)
-                    }
+                    showSearchForm = true
                 }) {
                     HStack {
                         Image(systemName: "plus.circle.fill")
@@ -113,11 +159,30 @@ struct JobSearchView: View {
                 .padding()
             }
             .navigationTitle("Job Search")
+            .sheet(isPresented: $showSearchForm) {
+                JobSearchFormView()
+            }
+            .onChange(of: showSearchForm) { oldValue, newValue in
+                // Refresh job posts when form is dismissed
+                if !newValue {
+                    Task {
+                        await fetchJobPosts()
+                    }
+                }
+            }
+            .alert("Application Submitted!", isPresented: $showApplicationSuccess) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("You've successfully applied to \(appliedJobTitle)")
+            }
             .onAppear {
                 loadSavedPosts()
                 Task {
                     await fetchJobPosts()
                 }
+            }
+            .refreshable {
+                await fetchJobPosts()
             }
         }
     }
@@ -163,6 +228,8 @@ struct JobSearchView: View {
                 }
                 
                 self.jobPosts = uniquePosts
+                // Initialize swipeable posts (exclude already applied jobs)
+                self.swipeablePosts = uniquePosts
                 self.loading = false
                 
                 // Load saved posts after fetching
@@ -184,6 +251,41 @@ struct JobSearchView: View {
         }
     }
     
+    private func applyToJob(post: JobPost) {
+        Task {
+            do {
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd"
+                
+                let application = Application(
+                    id: UUID().uuidString,
+                    jobPostId: post.id,
+                    jobTitle: post.title,
+                    company: post.company,
+                    status: "applied",
+                    appliedDate: dateFormatter.string(from: Date()),
+                    resumeUrl: nil // TODO: Get from uploaded resume
+                )
+                
+                try await SupabaseService.shared.insertApplication(application)
+                
+                // Remove from swipeable posts
+                await MainActor.run {
+                    swipeablePosts.removeAll { $0.id == post.id }
+                    appliedJobTitle = post.title
+                    showApplicationSuccess = true
+                }
+            } catch {
+                print("Error applying to job: \(error)")
+            }
+        }
+    }
+    
+    private func passJob(post: JobPost) {
+        // Remove from swipeable posts
+        swipeablePosts.removeAll { $0.id == post.id }
+    }
+    
     private func loadSampleData() {
         // Sample data for testing (fallback when Supabase is not configured)
         jobPosts = [
@@ -199,6 +301,7 @@ struct JobSearchView: View {
                 jobType: "Full-time"
             )
         ]
+        swipeablePosts = jobPosts
     }
 }
 
@@ -208,83 +311,149 @@ struct JobPostCard: View {
     let onToggleSave: () -> Void
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(post.title)
-                        .font(.headline)
-                    Text(post.company)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Image(systemName: "briefcase")
-                    .foregroundColor(.secondary)
-            }
-            
-            Text("Location: \(post.location)")
-                .font(.caption)
-            
-            if let salary = post.salary {
-                Text("Salary: \(salary)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            if let jobType = post.jobType {
-                Text("Type: \(jobType)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            Text("Posted: \(formatDate(post.postedDate))")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            HStack(spacing: 12) {
-                if let url = post.url, !url.isEmpty {
-                    Button(action: {
-                        if let url = URL(string: url) {
-                            UIApplication.shared.open(url)
-                        }
-                    }) {
-                        Text("View Details")
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(8)
-                    }
-                } else {
-                    Text("No Link")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.gray)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header Section
+            HStack(alignment: .top, spacing: 12) {
+                // Company Icon/Avatar
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.1))
+                        .frame(width: 50, height: 50)
+                    Image(systemName: "building.2")
+                        .foregroundColor(.blue)
+                        .font(.title3)
                 }
                 
+                // Title and Company
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(post.title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                    
+                    Text(post.company)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                
+                Spacer()
+                
+                // Save Button
                 Button(action: onToggleSave) {
-                    Image(systemName: isSaved ? "star.fill" : "star")
-                        .foregroundColor(isSaved ? .yellow : .gray)
-                        .frame(width: 44, height: 44)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                    Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                        .foregroundColor(isSaved ? .blue : .gray)
+                        .font(.system(size: 20))
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+            
+            Divider()
+                .padding(.horizontal, 16)
+            
+            // Info Section
+            VStack(alignment: .leading, spacing: 10) {
+                // Location
+                HStack(spacing: 8) {
+                    Image(systemName: "location.fill")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 14))
+                    Text(post.location)
+                        .font(.system(size: 14))
+                        .foregroundColor(.primary)
+                }
+                
+                // Salary and Job Type Row
+                HStack(spacing: 16) {
+                    if let salary = post.salary {
+                        HStack(spacing: 6) {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .foregroundColor(.green)
+                                .font(.system(size: 14))
+                            Text(salary)
+                                .font(.system(size: 14))
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    
+                    if let jobType = post.jobType {
+                        HStack(spacing: 6) {
+                            Image(systemName: "clock.fill")
+                                .foregroundColor(.orange)
+                                .font(.system(size: 14))
+                            Text(jobType)
+                                .font(.system(size: 14))
+                                .foregroundColor(.primary)
+                        }
+                    }
+                }
+                
+                // Posted Date
+                HStack(spacing: 6) {
+                    Image(systemName: "calendar")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 12))
+                    Text("Posted \(formatDate(post.postedDate))")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            
+            Divider()
+                .padding(.horizontal, 16)
+            
+            // Action Button
+            if let url = post.url, !url.isEmpty {
+                Button(action: {
+                    if let url = URL(string: url) {
+                        UIApplication.shared.open(url)
+                    }
+                }) {
+                    HStack {
+                        Spacer()
+                        Text("View Job")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                        Spacer()
+                    }
+                    .padding(.vertical, 14)
+                    .background(Color.blue)
+                    .cornerRadius(10)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
         }
-        .padding()
         .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.systemGray5), lineWidth: 0.5)
+        )
     }
     
     private func formatDate(_ dateString: String) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         if let date = formatter.date(from: dateString) {
-            formatter.dateStyle = .medium
-            return formatter.string(from: date)
+            let calendar = Calendar.current
+            let daysAgo = calendar.dateComponents([.day], from: date, to: Date()).day ?? 0
+            
+            if daysAgo == 0 {
+                return "today"
+            } else if daysAgo == 1 {
+                return "yesterday"
+            } else if daysAgo < 7 {
+                return "\(daysAgo) days ago"
+            } else {
+                formatter.dateStyle = .medium
+                return formatter.string(from: date)
+            }
         }
         return dateString
     }

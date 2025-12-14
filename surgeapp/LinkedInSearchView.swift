@@ -83,14 +83,15 @@ struct LinkedInSearchView: View {
                     Spacer()
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 16) {
+                        LazyVStack(spacing: 20) {
                             ForEach(filteredProfiles) { profile in
                                 LinkedInProfileCard(profile: profile, isSaved: savedProfileIds.contains(profile.id)) {
                                     toggleSave(profile: profile)
                                 }
                             }
                         }
-                        .padding()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
                 }
                 
@@ -113,6 +114,14 @@ struct LinkedInSearchView: View {
             .navigationTitle("LinkedIn Search")
             .sheet(isPresented: $showSearchForm) {
                 LinkedInSearchFormView()
+            }
+            .onChange(of: showSearchForm) { oldValue, newValue in
+                // Refresh profiles when form is dismissed
+                if !newValue {
+                    Task {
+                        await fetchProfiles()
+                    }
+                }
             }
             .onAppear {
                 loadSavedProfiles()
@@ -211,50 +220,107 @@ struct LinkedInProfileCard: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(displayName)
-                        .font(.headline)
-                    Text(displayTitle)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Image(systemName: "person.2")
-                    .foregroundColor(.secondary)
-            }
-            
-            Text("Company: \(profile.company)")
-                .font(.caption)
-            
-            HStack(spacing: 12) {
-                Button(action: {
-                    if let url = URL(string: profile.linkedin) {
-                        UIApplication.shared.open(url)
-                    }
-                }) {
-                    Text("View Profile")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header Section
+            HStack(alignment: .top, spacing: 12) {
+                // Profile Avatar
+                ZStack {
+                    Circle()
+                        .fill(Color.blue.opacity(0.1))
+                        .frame(width: 50, height: 50)
+                    Image(systemName: "person.fill")
+                        .foregroundColor(.blue)
+                        .font(.title3)
                 }
                 
+                // Name and Title
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(displayName)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                    
+                    Text(displayTitle)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+                
+                Spacer()
+                
+                // Save Button
                 Button(action: onToggleSave) {
-                    Image(systemName: isSaved ? "star.fill" : "star")
-                        .foregroundColor(isSaved ? .yellow : .gray)
-                        .frame(width: 44, height: 44)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                    Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                        .foregroundColor(isSaved ? .blue : .gray)
+                        .font(.system(size: 20))
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+            
+            Divider()
+                .padding(.horizontal, 16)
+            
+            // Info Section
+            VStack(alignment: .leading, spacing: 10) {
+                // Company
+                HStack(spacing: 8) {
+                    Image(systemName: "building.2.fill")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 14))
+                    Text(profile.company)
+                        .font(.system(size: 14))
+                        .foregroundColor(.primary)
+                }
+                
+                // Connections (if available)
+                if let connections = profile.connections {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.2.fill")
+                            .foregroundColor(.blue)
+                            .font(.system(size: 14))
+                        Text("\(connections) connections")
+                            .font(.system(size: 14))
+                            .foregroundColor(.primary)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            
+            Divider()
+                .padding(.horizontal, 16)
+            
+            // Action Button
+            Button(action: {
+                if let url = URL(string: profile.linkedin) {
+                    UIApplication.shared.open(url)
+                }
+            }) {
+                HStack {
+                    Spacer()
+                    Image(systemName: "link")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("View LinkedIn Profile")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                    Spacer()
+                }
+                .padding(.vertical, 14)
+                .background(Color.blue)
+                .cornerRadius(10)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
-        .padding()
         .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.systemGray5), lineWidth: 0.5)
+        )
     }
 }
 

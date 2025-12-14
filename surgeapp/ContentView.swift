@@ -24,6 +24,16 @@ struct ContentView: View {
                 .tabItem {
                     Label("Emails", systemImage: "envelope")
                 }
+            
+            ResumeUploadView()
+                .tabItem {
+                    Label("Resume", systemImage: "doc.text")
+                }
+            
+            ApplicationsView()
+                .tabItem {
+                    Label("Applications", systemImage: "briefcase.fill")
+                }
         }
     }
 }

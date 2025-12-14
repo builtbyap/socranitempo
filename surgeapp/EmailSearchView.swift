@@ -14,6 +14,7 @@ struct EmailSearchView: View {
     @State private var error: String?
     @State private var searchQuery = ""
     @State private var selectedTab = 0
+    @State private var showSearchForm = false
     
     var savedEmails: [EmailContact] {
         emailContacts.filter { savedEmailIds.contains($0.id) }
@@ -82,22 +83,21 @@ struct EmailSearchView: View {
                     Spacer()
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 16) {
+                        LazyVStack(spacing: 20) {
                             ForEach(filteredEmails) { contact in
                                 EmailContactCard(contact: contact, isSaved: savedEmailIds.contains(contact.id)) {
                                     toggleSave(contact: contact)
                                 }
                             }
                         }
-                        .padding()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
                 }
                 
                 // Action Button
                 Button(action: {
-                    if let url = URL(string: "https://n8n.socrani.com/form/6272f3aa-a2f6-417a-9977-2b11ec3488a7") {
-                        UIApplication.shared.open(url)
-                    }
+                    showSearchForm = true
                 }) {
                     HStack {
                         Image(systemName: "plus.circle.fill")
@@ -112,6 +112,17 @@ struct EmailSearchView: View {
                 .padding()
             }
             .navigationTitle("Email Search")
+            .sheet(isPresented: $showSearchForm) {
+                EmailSearchFormView()
+            }
+            .onChange(of: showSearchForm) { oldValue, newValue in
+                // Refresh email list when form is dismissed
+                if !newValue {
+                    Task {
+                        await fetchEmails()
+                    }
+                }
+            }
             .onAppear {
                 loadSavedEmails()
                 Task {
@@ -197,62 +208,124 @@ struct EmailContactCard: View {
     let onToggleSave: () -> Void
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(contact.name)
-                        .font(.headline)
-                    Text(contact.email)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-                Image(systemName: "envelope")
-                    .foregroundColor(.secondary)
-            }
-            
-            Text("Company: \(contact.company)")
-                .font(.caption)
-            
-            Text("Last contacted: \(formatDate(contact.lastContact))")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            
-            HStack(spacing: 12) {
-                Button(action: {
-                    if let url = URL(string: "mailto:\(contact.email)") {
-                        UIApplication.shared.open(url)
-                    }
-                }) {
-                    Text("Send Email")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header Section
+            HStack(alignment: .top, spacing: 12) {
+                // Email Avatar
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(0.1))
+                        .frame(width: 50, height: 50)
+                    Image(systemName: "envelope.fill")
+                        .foregroundColor(.green)
+                        .font(.title3)
                 }
                 
+                // Name and Email
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(contact.name)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                    
+                    Text(contact.email)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundColor(.blue)
+                        .lineLimit(1)
+                }
+                
+                Spacer()
+                
+                // Save Button
                 Button(action: onToggleSave) {
-                    Image(systemName: isSaved ? "star.fill" : "star")
-                        .foregroundColor(isSaved ? .yellow : .gray)
-                        .frame(width: 44, height: 44)
-                        .background(Color(.systemGray6))
-                        .cornerRadius(8)
+                    Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                        .foregroundColor(isSaved ? .blue : .gray)
+                        .font(.system(size: 20))
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+            
+            Divider()
+                .padding(.horizontal, 16)
+            
+            // Info Section
+            VStack(alignment: .leading, spacing: 10) {
+                // Company
+                HStack(spacing: 8) {
+                    Image(systemName: "building.2.fill")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 14))
+                    Text(contact.company)
+                        .font(.system(size: 14))
+                        .foregroundColor(.primary)
+                }
+                
+                // Last Contacted
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.fill")
+                        .foregroundColor(.secondary)
+                        .font(.system(size: 12))
+                    Text("Last contacted \(formatDate(contact.lastContact))")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            
+            Divider()
+                .padding(.horizontal, 16)
+            
+            // Action Button
+            Button(action: {
+                if let url = URL(string: "mailto:\(contact.email)") {
+                    UIApplication.shared.open(url)
+                }
+            }) {
+                HStack {
+                    Spacer()
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Send Email")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
+                    Spacer()
+                }
+                .padding(.vertical, 14)
+                .background(Color.green)
+                .cornerRadius(10)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
-        .padding()
         .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.systemGray5), lineWidth: 0.5)
+        )
     }
     
     private func formatDate(_ dateString: String) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         if let date = formatter.date(from: dateString) {
-            formatter.dateStyle = .medium
-            return formatter.string(from: date)
+            let calendar = Calendar.current
+            let daysAgo = calendar.dateComponents([.day], from: date, to: Date()).day ?? 0
+            
+            if daysAgo == 0 {
+                return "today"
+            } else if daysAgo == 1 {
+                return "yesterday"
+            } else if daysAgo < 7 {
+                return "\(daysAgo) days ago"
+            } else {
+                formatter.dateStyle = .medium
+                return formatter.string(from: date)
+            }
         }
         return dateString
     }

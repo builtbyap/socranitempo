@@ -59,3 +59,24 @@ struct EmailContact: Identifiable, Codable {
     }
 }
 
+// MARK: - Application Model
+struct Application: Identifiable, Codable {
+    let id: String
+    let jobPostId: String
+    let jobTitle: String
+    let company: String
+    let status: String // "applied", "viewed", "interview", "rejected", "accepted"
+    let appliedDate: String
+    let resumeUrl: String?
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case jobPostId = "job_post_id"
+        case jobTitle = "job_title"
+        case company
+        case status
+        case appliedDate = "applied_date"
+        case resumeUrl = "resume_url"
+    }
+}
+
