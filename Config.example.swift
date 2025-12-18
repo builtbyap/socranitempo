@@ -14,5 +14,7 @@ struct Config {
     static let apifyToken = "YOUR_APIFY_API_TOKEN_HERE"
     static let hunterApiKey = "YOUR_HUNTER_API_KEY_HERE"
     static let serpApiKey = "YOUR_SERPAPI_KEY_HERE"
+    static let openAIKey = "YOUR_OPENAI_API_KEY_HERE"
+    static let googleClientID = "YOUR_GOOGLE_CLIENT_ID_HERE"
 }
 

@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		E03EA3BE2EECA333009D4BCC /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = E03EA3C02EECA333009D4BCC /* GoogleSignIn */; };
+		E03EA3BF2EECA333009D4BCC /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = E03EA3C12EECA333009D4BCC /* GoogleSignInSwift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		E03EA3A12EECA333009D4BCC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -34,6 +39,9 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = surgeapp;
 			sourceTree = "<group>";
+			exceptions = (
+				E03EA3C42EECA333009D4BCC /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+			);
 		};
 		E03EA3A32EECA333009D4BCC /* surgeappTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -52,6 +60,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E03EA3BE2EECA333009D4BCC /* GoogleSignIn in Frameworks */,
+				E03EA3BF2EECA333009D4BCC /* GoogleSignInSwift in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +122,8 @@
 			);
 			name = surgeapp;
 			packageProductDependencies = (
+				E03EA3C02EECA333009D4BCC /* GoogleSignIn */,
+				E03EA3C12EECA333009D4BCC /* GoogleSignInSwift */,
 			);
 			productName = surgeapp;
 			productReference = E03EA3932EECA330009D4BCC /* surgeapp.app */;
@@ -195,6 +207,9 @@
 			);
 			mainGroup = E03EA38A2EECA330009D4BCC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				E03EA3C22EECA333009D4BCC /* XCLocalSwiftPackageReference "../../Downloads/GoogleSignIn-iOS-main" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E03EA3942EECA330009D4BCC /* Products */;
 			projectDirPath = "";
@@ -395,13 +410,10 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LB232S7TR2;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = surgeapp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -426,13 +438,10 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = LB232S7TR2;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = surgeapp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -570,6 +579,38 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		E03EA3C22EECA333009D4BCC /* XCLocalSwiftPackageReference "../../Downloads/GoogleSignIn-iOS-main" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../Downloads/GoogleSignIn-iOS-main";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E03EA3C02EECA333009D4BCC /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E03EA3C22EECA333009D4BCC /* XCLocalSwiftPackageReference "../../Downloads/GoogleSignIn-iOS-main" */;
+			productName = GoogleSignIn;
+		};
+		E03EA3C12EECA333009D4BCC /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = E03EA3C22EECA333009D4BCC /* XCLocalSwiftPackageReference "../../Downloads/GoogleSignIn-iOS-main" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		E03EA3C42EECA333009D4BCC /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			exceptions = (
+				{
+					exceptionKind = 1;
+					filePath = Info.plist;
+				},
+			);
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 	};
 	rootObject = E03EA38B2EECA330009D4BCC /* Project object */;
 }

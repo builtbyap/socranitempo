@@ -11,33 +11,22 @@ struct ApplicationsView: View {
     @State private var applications: [Application] = []
     @State private var loading = false
     @State private var error: String?
-    @State private var selectedStatus: String = "all"
     
-    var filteredApplications: [Application] {
-        if selectedStatus == "all" {
-            return applications
+    // Only show applications where user actually applied (status is "applied" or post-application statuses)
+    var appliedApplications: [Application] {
+        return applications.filter { application in
+            // Show all applications - they're all ones the user applied to
+            // Filter out any that might have status "viewed" or other non-application statuses
+            application.status == "applied" || 
+            application.status == "interview" || 
+            application.status == "rejected" || 
+            application.status == "accepted"
         }
-        return applications.filter { $0.status == selectedStatus }
     }
     
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Status Filter
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        StatusFilterButton(title: "All", status: "all", selectedStatus: $selectedStatus)
-                        StatusFilterButton(title: "Applied", status: "applied", selectedStatus: $selectedStatus)
-                        StatusFilterButton(title: "Viewed", status: "viewed", selectedStatus: $selectedStatus)
-                        StatusFilterButton(title: "Interview", status: "interview", selectedStatus: $selectedStatus)
-                        StatusFilterButton(title: "Rejected", status: "rejected", selectedStatus: $selectedStatus)
-                        StatusFilterButton(title: "Accepted", status: "accepted", selectedStatus: $selectedStatus)
-                    }
-                    .padding(.horizontal)
-                }
-                .padding(.vertical, 12)
-                .background(Color(.systemGray6))
-                
                 // Applications List
                 if loading {
                     Spacer()
@@ -54,13 +43,13 @@ struct ApplicationsView: View {
                             .padding()
                     }
                     Spacer()
-                } else if filteredApplications.isEmpty {
+                } else if appliedApplications.isEmpty {
                     Spacer()
                     VStack(spacing: 16) {
                         Image(systemName: "briefcase.fill")
                             .font(.system(size: 60))
                             .foregroundColor(.secondary)
-                        Text(selectedStatus == "all" ? "No applications yet" : "No \(selectedStatus) applications")
+                        Text("No applications yet")
                             .font(.headline)
                             .foregroundColor(.secondary)
                         Text("Swipe right on jobs to apply")
@@ -71,7 +60,7 @@ struct ApplicationsView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 16) {
-                            ForEach(filteredApplications) { application in
+                            ForEach(appliedApplications) { application in
                                 ApplicationCard(application: application)
                             }
                         }
@@ -104,34 +93,6 @@ struct ApplicationsView: View {
                 self.error = error.localizedDescription
                 self.loading = false
             }
-        }
-    }
-}
-
-struct StatusFilterButton: View {
-    let title: String
-    let status: String
-    @Binding var selectedStatus: String
-    
-    var isSelected: Bool {
-        selectedStatus == status
-    }
-    
-    var body: some View {
-        Button(action: {
-            selectedStatus = status
-        }) {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(isSelected ? .white : .primary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(isSelected ? Color.blue : Color(.systemBackground))
-                .cornerRadius(20)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(Color.blue.opacity(isSelected ? 0 : 0.3), lineWidth: 1)
-                )
         }
     }
 }

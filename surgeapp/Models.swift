@@ -80,3 +80,81 @@ struct Application: Identifiable, Codable {
     }
 }
 
+// MARK: - Work Experience Model
+struct WorkExperience: Codable {
+    let title: String
+    let company: String
+    let duration: String?
+    let description: String?
+}
+
+// MARK: - Education Model
+struct Education: Codable {
+    let degree: String
+    let school: String
+    let year: String?
+}
+
+// MARK: - Project Model
+struct Project: Codable {
+    let name: String
+    let description: String?
+    let technologies: String?
+    let url: String?
+}
+
+// MARK: - Language Model
+struct Language: Codable {
+    let name: String
+    let proficiency: String?
+}
+
+// MARK: - Certification Model
+struct Certification: Codable {
+    let name: String
+    let issuer: String?
+    let date: String?
+    let expiryDate: String?
+}
+
+// MARK: - Award Model
+struct Award: Codable {
+    let title: String
+    let issuer: String?
+    let date: String?
+    let description: String?
+}
+
+// MARK: - Resume Data Model
+struct ResumeData: Identifiable, Codable {
+    let id: String
+    let name: String?
+    let email: String?
+    let phone: String?
+    let skills: [String]?
+    let workExperience: [WorkExperience]?
+    let education: [Education]?
+    let projects: [Project]?
+    let languages: [Language]?
+    let certifications: [Certification]?
+    let awards: [Award]?
+    let resumeUrl: String?
+    let parsedAt: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case email
+        case phone
+        case skills
+        case workExperience = "work_experience"
+        case education
+        case projects
+        case languages
+        case certifications
+        case awards
+        case resumeUrl = "resume_url"
+        case parsedAt = "parsed_at"
+    }
+}
+
