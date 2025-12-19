@@ -15,9 +15,9 @@ struct ContentView: View {
                     Label("Feed", systemImage: "newspaper.fill")
                 }
             
-            JobSearchView()
+            ApplicationsView()
                 .tabItem {
-                    Label("Jobs", systemImage: "briefcase")
+                    Label("Applications", systemImage: "briefcase.fill")
                 }
             
             LinkedInSearchView()
@@ -30,14 +30,9 @@ struct ContentView: View {
                     Label("Emails", systemImage: "envelope")
                 }
             
-            ResumeUploadView()
+            ProfileView()
                 .tabItem {
-                    Label("Resume", systemImage: "doc.text")
-                }
-            
-            ApplicationsView()
-                .tabItem {
-                    Label("Applications", systemImage: "briefcase.fill")
+                    Label("Profile", systemImage: "person.fill")
                 }
         }
     }

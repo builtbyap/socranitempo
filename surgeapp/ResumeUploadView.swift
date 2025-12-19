@@ -10,6 +10,19 @@ import UniformTypeIdentifiers
 import PDFKit
 import UIKit
 
+// Lazy view helper to defer initialization until view appears
+struct LazyView<Content: View>: View {
+    let build: () -> Content
+    
+    init(_ build: @autoclosure @escaping () -> Content) {
+        self.build = build
+    }
+    
+    var body: Content {
+        build()
+    }
+}
+
 struct ResumeUploadView: View {
     @State private var selectedFile: URL?
     @State private var fileName: String = ""
@@ -26,9 +39,11 @@ struct ResumeUploadView: View {
     @State private var showPreview = false
     @State private var showReviewView = false
     @State private var selectedPreviewTab = 0 // 0: Document, 1: Parsed Info
+    @State private var cachedFileSize: String?
+    @State private var shouldLoadPDFPreview = false
     
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Group {
                 // Show loading screen when parsing or uploading
                 if isParsing || isUploading {
@@ -71,6 +86,8 @@ struct ResumeUploadView: View {
                                         Button(action: {
                                             selectedFile = nil
                                             fileName = ""
+                                            cachedFileSize = nil
+                                            shouldLoadPDFPreview = false
                                         }) {
                                             Image(systemName: "xmark.circle.fill")
                                                 .foregroundColor(.gray)
@@ -80,11 +97,35 @@ struct ResumeUploadView: View {
                                     
                                     // Actual resume document preview
                                     if file.pathExtension.lowercased() == "pdf" {
-                                        // PDF Preview
-                                        PDFPreviewView(url: file)
+                                        // PDF Preview - only load after view appears to prevent freezing
+                                        if shouldLoadPDFPreview {
+                                            PDFPreviewView(url: file)
+                                                .frame(height: 500)
+                                                .background(Color(.systemGray5))
+                                                .cornerRadius(12)
+                                        } else {
+                                            // Placeholder while waiting for view to be ready
+                                            VStack(spacing: 16) {
+                                                ProgressView()
+                                                    .scaleEffect(1.2)
+                                                Text("Preparing preview...")
+                                                    .font(.system(size: 14))
+                                                    .foregroundColor(.secondary)
+                                            }
                                             .frame(height: 500)
+                                            .frame(maxWidth: .infinity)
                                             .background(Color(.systemGray5))
                                             .cornerRadius(12)
+                                            .onAppear {
+                                                // Defer PDF loading until view is ready
+                                                Task {
+                                                    try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+                                                    await MainActor.run {
+                                                        shouldLoadPDFPreview = true
+                                                    }
+                                                }
+                                            }
+                                        }
                                     } else {
                                         // Word document - show file info with link to full preview
                                         NavigationLink(destination: ResumePreviewView(fileURL: file, fileName: fileName)) {
@@ -96,10 +137,17 @@ struct ResumeUploadView: View {
                                                 Text(fileName)
                                                     .font(.system(size: 16, weight: .semibold))
                                                 
-                                                if let fileSize = getFileSize(url: file) {
+                                                if let fileSize = cachedFileSize {
                                                     Text(fileSize)
                                                         .font(.system(size: 14))
                                                         .foregroundColor(.secondary)
+                                                } else {
+                                                    Text("Loading...")
+                                                        .font(.system(size: 14))
+                                                        .foregroundColor(.secondary)
+                                                        .task {
+                                                            await loadFileSize()
+                                                        }
                                                 }
                                                 
                                                 Text("Tap to view full document")
@@ -156,32 +204,31 @@ struct ResumeUploadView: View {
                                     Button(action: {
                                         showGoogleDriveBrowser = true
                                     }) {
-                                        HStack(spacing: 12) {
+                                        VStack(spacing: 12) {
                                             Image(systemName: "icloud.fill")
-                                                .font(.system(size: 24))
+                                                .font(.system(size: 50))
                                                 .foregroundColor(.blue)
                                             
                                             Text("Upload from Google Drive")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .foregroundColor(.primary)
+                                                .font(.system(size: 18, weight: .semibold))
+                                                .foregroundColor(.blue)
                                             
-                                            Spacer()
-                                            
-                                            Image(systemName: "chevron.right")
+                                            Text("Access files from your Google Drive")
                                                 .font(.system(size: 14))
                                                 .foregroundColor(.secondary)
                                         }
                                         .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 16)
-                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 40)
                                         .background(Color(.systemGray6))
-                                        .cornerRadius(12)
+                                        .cornerRadius(16)
                                         .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(Color.blue.opacity(0.3), style: StrokeStyle(lineWidth: 2, dash: [10]))
                                         )
                                     }
                                 }
+                                .frame(maxWidth: 400)
+                                .frame(maxWidth: .infinity)
                             }
                         }
                         .padding(.horizontal)
@@ -189,41 +236,43 @@ struct ResumeUploadView: View {
                         // Upload Button
                         if selectedFile != nil && !fileName.isEmpty {
                             if !showPreview {
-                            // Upload Resume Button (will parse first)
-                            Button(action: {
-                                Task {
-                                    await parseAndShowPreview()
-                                }
-                            }) {
-                                HStack {
-                                    if isParsing {
-                                        ProgressView()
-                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    } else {
-                                        Image(systemName: "arrow.up.circle.fill")
-                                            .font(.system(size: 20))
+                                // Upload Resume Button (will parse first)
+                                Button(action: {
+                                    print("🔘 Upload Resume button tapped")
+                                    // Run parsing on background thread to prevent UI freeze
+                                    Task.detached(priority: .userInitiated) {
+                                        print("⚙️ Task.detached started on thread: \(Thread.current)")
+                                        await parseAndShowPreview()
                                     }
-                                    
-                                    Text(isParsing ? "Analyzing Resume..." : "Upload Resume")
-                                        .font(.system(size: 18, weight: .semibold))
+                                }) {
+                                    HStack {
+                                        if isParsing {
+                                            ProgressView()
+                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        } else {
+                                            Image(systemName: "arrow.up.circle.fill")
+                                                .font(.system(size: 20))
+                                        }
+                                        
+                                        Text(isParsing ? "Analyzing Resume..." : "Upload Resume")
+                                            .font(.system(size: 18, weight: .semibold))
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 16)
+                                    .background(isParsing ? Color.blue.opacity(0.6) : Color.blue)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(12)
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(isParsing ? Color.blue.opacity(0.6) : Color.blue)
-                                .foregroundColor(.white)
-                                .cornerRadius(12)
-                            }
-                            .disabled(isParsing)
-                            .padding(.horizontal)
-                            
-                            if isParsing {
-                                ProgressView(value: uploadProgress)
-                                    .progressViewStyle(LinearProgressViewStyle())
-                                    .padding(.horizontal)
-                            }
+                                .disabled(isParsing)
+                                .padding(.horizontal)
+                                
+                                if isParsing {
+                                    ProgressView(value: uploadProgress)
+                                        .progressViewStyle(LinearProgressViewStyle())
+                                        .padding(.horizontal)
+                                }
                             } else {
                                 // Preview Tabs and Action Buttons (shown after preview)
-                                if showPreview {
                                     VStack(spacing: 16) {
                                         // Tab Selector
                                         Picker("", selection: $selectedPreviewTab) {
@@ -299,8 +348,7 @@ struct ResumeUploadView: View {
                                         } else {
                                             // Parsed Info Tab
                                             if let resumeData = parsedResumeData {
-                                                ScrollView {
-                                                    VStack(spacing: 24) {
+                                                VStack(spacing: 24) {
                                                         // Header
                                                         VStack(spacing: 8) {
                                                             HStack {
@@ -447,8 +495,29 @@ struct ResumeUploadView: View {
                                             }
                                         }
                                         
-                                        // Confirm Upload and Delete Buttons
+                                        // Action Buttons
                                         VStack(spacing: 12) {
+                                            // Review & Edit Button
+                                            Button(action: {
+                                                if parsedResumeData != nil {
+                                                    showReviewView = true
+                                                }
+                                            }) {
+                                                HStack {
+                                                    Image(systemName: "pencil.circle.fill")
+                                                        .font(.system(size: 20))
+                                                    Text("Review & Edit")
+                                                        .font(.system(size: 18, weight: .semibold))
+                                                }
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 16)
+                                                .background(Color.blue)
+                                                .foregroundColor(.white)
+                                                .cornerRadius(12)
+                                            }
+                                            .disabled(parsedResumeData == nil)
+                                            
+                                            // Confirm Upload Button
                                             Button(action: {
                                                 Task {
                                                     await uploadToSupabase()
@@ -466,8 +535,9 @@ struct ResumeUploadView: View {
                                                 .foregroundColor(.white)
                                                 .cornerRadius(12)
                                             }
-                                            .disabled(parsedResumeData == nil)
+                                            .disabled(parsedResumeData == nil || isUploading)
                                             
+                                            // Delete Button
                                             Button(action: {
                                                 deleteResume()
                                             }) {
@@ -488,7 +558,6 @@ struct ResumeUploadView: View {
                                     }
                                 }
                             }
-                        }
                         }
                         
                         // Error Message
@@ -551,10 +620,30 @@ struct ResumeUploadView: View {
             .sheet(isPresented: $showFilePicker) {
                 DocumentPicker(selectedFile: $selectedFile, fileName: $fileName)
             }
+            .onChange(of: selectedFile) { oldValue, newValue in
+                // Clear cached file size when file changes
+                if newValue != oldValue {
+                    cachedFileSize = nil
+                    shouldLoadPDFPreview = false
+                }
+            }
+            .onAppear {
+                // Reset PDF preview loading state when view appears
+                // This ensures smooth transitions when switching tabs
+                if selectedFile != nil && !shouldLoadPDFPreview {
+                    Task {
+                        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                        await MainActor.run {
+                            shouldLoadPDFPreview = true
+                        }
+                    }
+                }
+            }
             .sheet(isPresented: $showGoogleDriveBrowser) {
                 GoogleDriveBrowserView { fileURL, fileName in
                     selectedFile = fileURL
                     self.fileName = fileName
+                    cachedFileSize = nil
                 }
             }
             .sheet(isPresented: $showReviewView) {
@@ -563,6 +652,12 @@ struct ResumeUploadView: View {
                         get: { parsedResumeData ?? resumeData },
                         set: { parsedResumeData = $0 }
                     ))
+                } else {
+                    // Empty view to prevent crash if parsedResumeData is nil
+                    Text("Loading...")
+                        .onAppear {
+                            showReviewView = false
+                        }
                 }
             }
             .sheet(isPresented: $showResumeDetails) {
@@ -577,6 +672,12 @@ struct ResumeUploadView: View {
                                 }
                             }
                     }
+                } else {
+                    // Empty view to prevent crash if parsedResumeData is nil
+                    Text("Loading...")
+                        .onAppear {
+                            showResumeDetails = false
+                        }
                 }
             }
             .alert("Success", isPresented: $showSuccess) {
@@ -587,9 +688,33 @@ struct ResumeUploadView: View {
                 Text("Your resume has been uploaded and analyzed successfully!")
             }
         }
+    
+    private func loadFileSize() async {
+        guard let file = selectedFile else { return }
+        
+        // Load file size on background thread to avoid blocking
+        let fileSize: String? = await Task.detached(priority: .userInitiated) {
+            do {
+                let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+                if let size = attributes[.size] as? Int64 {
+                    let formatter = ByteCountFormatter()
+                    formatter.allowedUnits = [.useKB, .useMB]
+                    formatter.countStyle = .file
+                    return formatter.string(fromByteCount: size)
+                }
+            } catch {
+                return nil
+            }
+            return nil
+        }.value
+        
+        await MainActor.run {
+            cachedFileSize = fileSize
+        }
     }
     
     private func getFileSize(url: URL) -> String? {
+        // Synchronous version for backward compatibility (shouldn't be used in UI)
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
             if let size = attributes[.size] as? Int64 {
@@ -606,34 +731,75 @@ struct ResumeUploadView: View {
     
     // MARK: - Parse Resume and Show Preview
     private func parseAndShowPreview() async {
-        guard let file = selectedFile else { return }
+        print("🚀 Starting parseAndShowPreview on thread: \(Thread.current)")
+        guard let file = selectedFile else {
+            print("❌ No file selected")
+            return
+        }
         
-        isParsing = true
-        errorMessage = nil
-        uploadProgress = 0.0
-        showPreview = false
+        print("📁 Selected file: \(file.lastPathComponent)")
+        
+        // Update UI on main thread
+        await MainActor.run {
+            print("🎨 Updating UI on main thread")
+            isParsing = true
+            errorMessage = nil
+            uploadProgress = 0.0
+            showPreview = false
+        }
         
         do {
-            // Ensure we have access to the file
-            let accessing = file.startAccessingSecurityScopedResource()
+            // Check if file is in app's document directory (doesn't need security-scoped access)
+            let fileManager = FileManager.default
+            let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let isInDocuments = file.path.hasPrefix(documentsPath.path)
+            
+            // Only use security-scoped access if file is outside app's sandbox
+            var accessing = false
+            if !isInDocuments {
+                accessing = file.startAccessingSecurityScopedResource()
+            }
             defer {
                 if accessing {
                     file.stopAccessingSecurityScopedResource()
                 }
             }
             
-            // Step 1: Extract text from resume (50% progress)
+            // Verify file exists and is accessible
+            guard fileManager.fileExists(atPath: file.path) else {
+                await MainActor.run {
+                    isParsing = false
+                    errorMessage = "File not found. Please select the file again."
+                }
+                return
+            }
+            
+            // Verify file is readable
+            guard fileManager.isReadableFile(atPath: file.path) else {
+                await MainActor.run {
+                    isParsing = false
+                    errorMessage = "File is not readable. Please check file permissions."
+                }
+                return
+            }
+            
+            // Step 1: Extract text from resume (50% progress) - run on background thread
             await MainActor.run {
                 uploadProgress = 0.5
             }
             
             print("📄 Extracting text from resume...")
+            // Extract text (already running on background thread from button action)
             let resumeText = try await ResumeParserService.shared.extractText(from: file)
             print("✅ Extracted \(resumeText.count) characters from resume")
             
-            // Step 2: Parse resume data (100% progress)
+            guard !resumeText.isEmpty else {
+                throw ResumeParserError.couldNotReadFile
+            }
+            
+            // Step 2: Parse resume data (75% progress)
             await MainActor.run {
-                uploadProgress = 1.0
+                uploadProgress = 0.75
             }
             
             print("🔍 Parsing resume data with OpenAI...")
@@ -659,12 +825,16 @@ struct ResumeUploadView: View {
                 print("🎓 Education: \(education.count) entries")
             }
             
+            // Update UI on main thread
             await MainActor.run {
+                uploadProgress = 1.0
                 isParsing = false
                 parsedResumeData = resumeData
                 showPreview = true
-                showReviewView = true // Show review page after parsing
             }
+            
+            // Don't auto-show review view - let user decide when to review
+            // The preview is already shown, user can click to review if needed
         } catch {
             await MainActor.run {
                 isParsing = false
@@ -731,7 +901,6 @@ struct ResumeUploadView: View {
         uploadProgress = 0.0
         uploadedResumeURL = nil
     }
-    
 }
 
 struct FormatBadge: View {
@@ -757,31 +926,41 @@ struct ParsedInfoBubbleSection<Content: View>: View {
     let title: String
     let icon: String
     let color: Color
+    let onAdd: (() -> Void)?
     let content: Content
     
-    init(title: String, icon: String, color: Color, @ViewBuilder content: () -> Content) {
+    init(title: String, icon: String, color: Color, onAdd: (() -> Void)? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
         self.icon = icon
         self.color = color
+        self.onAdd = onAdd
         self.content = content()
     }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .foregroundColor(color)
-                    .font(.title3)
+                if !icon.isEmpty {
+                    Image(systemName: icon)
+                        .foregroundColor(color)
+                        .font(.title3)
+                }
                 Text(title)
                     .font(.system(size: 18, weight: .semibold))
+                Spacer()
+                if let onAdd = onAdd {
+                    Button(action: onAdd) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.black)
+                    }
+                }
             }
             
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
         .padding(.horizontal)
     }
 }
@@ -795,8 +974,8 @@ struct ParsedInfoBubble: View {
             .font(.system(size: 14, weight: .medium))
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(color.opacity(0.15))
-            .foregroundColor(color)
+            .background(Color(.systemGray5))
+            .foregroundColor(.black)
             .cornerRadius(8)
     }
 }
@@ -807,37 +986,68 @@ struct ParsedInfoCard: View {
     let detail: String?
     let description: String?
     let color: Color
+    let onEdit: (() -> Void)?
+    let onDelete: (() -> Void)?
     
-    init(title: String, subtitle: String? = nil, detail: String? = nil, description: String? = nil, color: Color) {
+    @State private var showingMenu = false
+    
+    init(title: String, subtitle: String? = nil, detail: String? = nil, description: String? = nil, color: Color, onEdit: (() -> Void)? = nil, onDelete: (() -> Void)? = nil) {
         self.title = title
         self.subtitle = subtitle
         self.detail = detail
         self.description = description
         self.color = color
+        self.onEdit = onEdit
+        self.onDelete = onDelete
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 16, weight: .semibold))
-            
-            if let subtitle = subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.black)
+                
+                if let subtitle = subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                }
+                
+                if let detail = detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                
+                if let description = description, !description.isEmpty {
+                    Text(description)
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
+                }
             }
             
-            if let detail = detail, !detail.isEmpty {
-                Text(detail)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
+            Spacer()
             
-            if let description = description, !description.isEmpty {
-                Text(description)
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-                    .padding(.top, 4)
+            if onEdit != nil || onDelete != nil {
+                Menu {
+                    if let onEdit = onEdit {
+                        Button(action: onEdit) {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                    }
+                    if let onDelete = onDelete {
+                        Button(role: .destructive, action: onDelete) {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.gray)
+                        .padding(8)
+                }
             }
         }
         .padding()
@@ -846,7 +1056,7 @@ struct ParsedInfoCard: View {
         .cornerRadius(8)
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(color.opacity(0.3), lineWidth: 1)
+                .stroke(Color(.systemGray4), lineWidth: 1)
         )
     }
 }

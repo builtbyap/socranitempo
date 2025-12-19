@@ -15,30 +15,72 @@ class ResumeParserService {
     
     // MARK: - Extract Text from File
     func extractText(from fileURL: URL) async throws -> String {
+        // This function is called from a detached task, so operations here run on background thread
         let fileExtension = fileURL.pathExtension.lowercased()
         
         switch fileExtension {
         case "pdf":
-            return try extractTextFromPDF(url: fileURL)
+            return try await extractTextFromPDF(url: fileURL)
         case "doc", "docx":
-            return try extractTextFromWord(url: fileURL)
+            return try await extractTextFromWord(url: fileURL)
         case "txt":
-            return try String(contentsOf: fileURL, encoding: .utf8)
+            return try await Task.detached(priority: .userInitiated) {
+                try String(contentsOf: fileURL, encoding: .utf8)
+            }.value
         default:
             throw ResumeParserError.unsupportedFormat
         }
     }
     
     // MARK: - Extract Text from PDF
-    private func extractTextFromPDF(url: URL) throws -> String {
-        guard let pdfDocument = PDFDocument(url: url) else {
+    private func extractTextFromPDF(url: URL) async throws -> String {
+        print("📄 [PDF] Starting extraction from: \(url.lastPathComponent)")
+        
+        // Ensure file is accessible
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            print("❌ [PDF] File does not exist")
+            throw ResumeParserError.couldNotReadFile
+        }
+        
+        print("📄 [PDF] Loading PDF data...")
+        // Load PDF data on background thread
+        let pdfData = try await Task.detached(priority: .userInitiated) {
+            print("📄 [PDF] Reading file data on thread: \(Thread.current)")
+            return try Data(contentsOf: url)
+        }.value
+        
+        print("📄 [PDF] Loaded \(pdfData.count) bytes, creating PDFDocument...")
+        
+        // Try to load PDF document
+        var pdfDocument: PDFDocument?
+        if let doc = PDFDocument(data: pdfData) {
+            pdfDocument = doc
+            print("📄 [PDF] PDFDocument created from data")
+        } else if let doc = PDFDocument(url: url) {
+            pdfDocument = doc
+            print("📄 [PDF] PDFDocument created from URL")
+        }
+        
+        guard let pdfDocument = pdfDocument else {
+            print("❌ [PDF] Failed to create PDFDocument")
             throw ResumeParserError.couldNotReadFile
         }
         
         var fullText = ""
         let pageCount = pdfDocument.pageCount
+        print("📄 [PDF] Document has \(pageCount) pages")
         
-        for pageIndex in 0..<pageCount {
+        // Limit to reasonable number of pages to avoid freezing on large PDFs
+        let maxPages = min(pageCount, 50)
+        
+        // Extract text page by page, yielding periodically to prevent blocking
+        for pageIndex in 0..<maxPages {
+            // Yield every 5 pages to keep UI responsive
+            if pageIndex % 5 == 0 && pageIndex > 0 {
+                print("📄 [PDF] Extracted \(pageIndex) pages, yielding...")
+                await Task.yield()
+            }
+            
             if let page = pdfDocument.page(at: pageIndex) {
                 if let pageText = page.string {
                     fullText += pageText + "\n"
@@ -46,25 +88,40 @@ class ResumeParserService {
             }
         }
         
-        return fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("📄 [PDF] Extracted text from \(maxPages) pages, total length: \(fullText.count)")
+        
+        let result = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Ensure we got some text
+        guard !result.isEmpty else {
+            print("❌ [PDF] Extracted text is empty")
+            throw ResumeParserError.couldNotReadFile
+        }
+        
+        print("✅ [PDF] Extraction complete")
+        return result
     }
     
     // MARK: - Extract Text from Word Document
-    private func extractTextFromWord(url: URL) throws -> String {
+    private func extractTextFromWord(url: URL) async throws -> String {
+        // Load file data on background thread
+        let fileData = try await Task.detached(priority: .userInitiated) {
+            try Data(contentsOf: url)
+        }.value
+        
         // For .docx files, we can read the XML content
         // For .doc files, we'd need a library, but for now we'll try to read as text
         if url.pathExtension.lowercased() == "docx" {
             // .docx is a ZIP file containing XML
-            // For simplicity, we'll try to read it as text (limited support)
-            if let data = try? Data(contentsOf: url),
-               let text = String(data: data, encoding: .utf8) {
-                // Extract text between XML tags (basic extraction)
-                return extractTextFromDocxXML(data: data)
+            // Extract text between XML tags (basic extraction)
+            let extractedText = extractTextFromDocxXML(data: fileData)
+            if !extractedText.isEmpty {
+                return extractedText
             }
         }
         
         // Fallback: try reading as plain text
-        if let text = try? String(contentsOf: url, encoding: .utf8) {
+        if let text = String(data: fileData, encoding: .utf8), !text.isEmpty {
             return text
         }
         

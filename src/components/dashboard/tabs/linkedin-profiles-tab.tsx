@@ -32,12 +32,11 @@ export default function LinkedInProfilesTab() {
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const supabase = createClient();
-
   useEffect(() => {
     async function fetchProfiles() {
       try {
         setLoading(true);
+        const supabase = createClient();
         const { data, error } = await supabase.from("profiles").select("*");
 
         if (error) {

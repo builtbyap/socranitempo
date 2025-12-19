@@ -282,8 +282,6 @@ struct EditableBubbleSection<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
     }
 }
 
@@ -299,7 +297,7 @@ struct EditableBubble: View {
         HStack(spacing: 6) {
             Text(text.isEmpty ? "Tap to add" : text)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(text.isEmpty ? .secondary : color)
+                .foregroundColor(text.isEmpty ? .secondary : .black)
             
             if let onDelete = onDelete {
                 Button(action: onDelete) {
@@ -311,8 +309,7 @@ struct EditableBubble: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(color.opacity(0.15))
-        .foregroundColor(color)
+        .background(Color(.systemGray5))
         .cornerRadius(8)
         .onTapGesture {
             showingEditSheet = true
@@ -746,14 +743,25 @@ struct AddProjectView: View {
 struct AddLanguageView: View {
     @Binding var languages: [Language]
     @State private var name = ""
-    @State private var proficiency = ""
+    @State private var selectedProficiency: ProficiencyOption = .none
     @Environment(\.dismiss) var dismiss
+    
+    enum ProficiencyOption: String, CaseIterable {
+        case none = "None"
+        case beginner = "Beginner"
+        case intermediate = "Intermediate"
+        case expert = "Expert"
+    }
     
     var body: some View {
         NavigationView {
             Form {
                 TextField("Language", text: $name)
-                TextField("Proficiency", text: $proficiency)
+                Picker("Proficiency", selection: $selectedProficiency) {
+                    ForEach(ProficiencyOption.allCases, id: \.self) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
             }
             .navigationTitle("Add Language")
             .navigationBarTitleDisplayMode(.inline)
@@ -766,7 +774,8 @@ struct AddLanguageView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Add") {
                         if !name.isEmpty {
-                            languages.append(Language(name: name, proficiency: proficiency.isEmpty ? nil : proficiency))
+                            let proficiency = selectedProficiency == .none ? nil : selectedProficiency.rawValue
+                            languages.append(Language(name: name, proficiency: proficiency))
                         }
                         dismiss()
                     }
@@ -1011,20 +1020,32 @@ struct EditProjectView: View {
 struct EditLanguageView: View {
     @Binding var language: Language
     @State private var name: String
-    @State private var proficiency: String
+    @State private var selectedProficiency: ProficiencyOption
     @Environment(\.dismiss) var dismiss
+    
+    enum ProficiencyOption: String, CaseIterable {
+        case none = "None"
+        case beginner = "Beginner"
+        case intermediate = "Intermediate"
+        case expert = "Expert"
+    }
     
     init(language: Binding<Language>) {
         self._language = language
         _name = State(initialValue: language.wrappedValue.name)
-        _proficiency = State(initialValue: language.wrappedValue.proficiency ?? "")
+        let proficiencyValue = language.wrappedValue.proficiency ?? ""
+        _selectedProficiency = State(initialValue: ProficiencyOption(rawValue: proficiencyValue) ?? .none)
     }
     
     var body: some View {
         NavigationView {
             Form {
                 TextField("Language", text: $name)
-                TextField("Proficiency", text: $proficiency)
+                Picker("Proficiency", selection: $selectedProficiency) {
+                    ForEach(ProficiencyOption.allCases, id: \.self) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
             }
             .navigationTitle("Edit Language")
             .navigationBarTitleDisplayMode(.inline)
@@ -1036,7 +1057,8 @@ struct EditLanguageView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Save") {
-                        language = Language(name: name, proficiency: proficiency.isEmpty ? nil : proficiency)
+                        let proficiency = selectedProficiency == .none ? nil : selectedProficiency.rawValue
+                        language = Language(name: name, proficiency: proficiency)
                         dismiss()
                     }
                     .fontWeight(.semibold)

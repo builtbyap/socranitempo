@@ -104,13 +104,15 @@ struct Project: Codable {
 }
 
 // MARK: - Language Model
-struct Language: Codable {
+struct Language: Codable, Identifiable, Hashable {
+    var id: String { "\(name)-\(proficiency ?? "")" }
     let name: String
     let proficiency: String?
 }
 
 // MARK: - Certification Model
-struct Certification: Codable {
+struct Certification: Codable, Identifiable, Hashable {
+    var id: String { "\(name)-\(issuer ?? "")-\(date ?? "")" }
     let name: String
     let issuer: String?
     let date: String?
@@ -118,7 +120,8 @@ struct Certification: Codable {
 }
 
 // MARK: - Award Model
-struct Award: Codable {
+struct Award: Codable, Identifiable, Hashable {
+    var id: String { "\(title)-\(issuer ?? "")-\(date ?? "")" }
     let title: String
     let issuer: String?
     let date: String?
