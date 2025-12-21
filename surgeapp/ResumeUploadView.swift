@@ -455,7 +455,7 @@ struct ResumeUploadView: View {
                                                                         Spacer()
                                                                     }
                                                                     .padding()
-                                                                    .background(Color.white)
+                                                                    .background(Color(.systemBackground))
                                                                     .cornerRadius(8)
                                                                 }
                                                             }
@@ -916,7 +916,7 @@ struct FormatBadge: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .cornerRadius(8)
     }
 }
@@ -952,7 +952,7 @@ struct ParsedInfoBubbleSection<Content: View>: View {
                     Button(action: onAdd) {
                         Image(systemName: "plus")
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundColor(.black)
+                            .foregroundColor(.primary)
                     }
                 }
             }
@@ -975,7 +975,7 @@ struct ParsedInfoBubble: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color(.systemGray5))
-            .foregroundColor(.black)
+            .foregroundColor(.primary)
             .cornerRadius(8)
     }
 }
@@ -1006,7 +1006,7 @@ struct ParsedInfoCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.black)
+                    .foregroundColor(.primary)
                 
                 if let subtitle = subtitle, !subtitle.isEmpty {
                     Text(subtitle)
@@ -1045,18 +1045,18 @@ struct ParsedInfoCard: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.gray)
+                        .foregroundColor(.secondary)
                         .padding(8)
                 }
             }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .cornerRadius(8)
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(.systemGray4), lineWidth: 1)
+                .stroke(Color(.separator), lineWidth: 1)
         )
     }
 }

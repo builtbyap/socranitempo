@@ -297,7 +297,7 @@ struct EditableBubble: View {
         HStack(spacing: 6) {
             Text(text.isEmpty ? "Tap to add" : text)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(text.isEmpty ? .secondary : .black)
+                .foregroundColor(text.isEmpty ? .secondary : .primary)
             
             if let onDelete = onDelete {
                 Button(action: onDelete) {
@@ -351,7 +351,7 @@ struct EditableEducationCard: View {
             }
         }
         .padding()
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .cornerRadius(8)
         .onTapGesture {
             showingEdit = true
@@ -391,7 +391,7 @@ struct EditableExperienceCard: View {
             }
         }
         .padding()
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .cornerRadius(8)
         .onTapGesture {
             showingEdit = true
@@ -428,7 +428,7 @@ struct EditableProjectCard: View {
             }
         }
         .padding()
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .cornerRadius(8)
         .onTapGesture {
             showingEdit = true
@@ -461,7 +461,7 @@ struct EditableLanguageCard: View {
             }
         }
         .padding()
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .cornerRadius(8)
         .onTapGesture {
             showingEdit = true
@@ -498,7 +498,7 @@ struct EditableCertificationCard: View {
             }
         }
         .padding()
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .cornerRadius(8)
         .onTapGesture {
             showingEdit = true
@@ -535,7 +535,7 @@ struct EditableAwardCard: View {
             }
         }
         .padding()
-        .background(Color.white)
+        .background(Color(.systemBackground))
         .cornerRadius(8)
         .onTapGesture {
             showingEdit = true

@@ -55,6 +55,9 @@ struct ProfileView: View {
     @State private var interests: [String] = []
     @State private var relevantCoursework: [String] = []
     
+    // Career Archetypes
+    @State private var careerArchetypes: [String] = []
+    
     // Add sheet states
     @State private var showingAddLanguage = false
     @State private var showingAddCertification = false
@@ -65,6 +68,7 @@ struct ProfileView: View {
     @State private var showingAddProject = false
     @State private var showingAddSkill = false
     @State private var showingAddEducation = false
+    @State private var showingAddCareerArchetype = false
     
     // Edit sheet states
     @State private var showingEditLanguage: Language?
@@ -72,6 +76,7 @@ struct ProfileView: View {
     @State private var showingEditAward: Award?
     @State private var editingInterestIndex: Int?
     @State private var editingCourseworkIndex: Int?
+    @State private var editingCareerArchetypeIndex: Int?
     
     var body: some View {
         NavigationStack {
@@ -129,10 +134,19 @@ struct ProfileView: View {
                     shouldLoadPDFPreview = false
                     // Save file and auto-parse when new file is selected (not when loading saved file)
                     if newValue != nil && oldValue == nil {
-                        // New file selected, save it
-                        saveResumeFile()
-                        Task {
-                            await parseResume()
+                        // New file selected (not from loadSavedResume), save it and parse
+                        // Check if this is a new file by seeing if it's in the saved location
+                        let fileManager = FileManager.default
+                        let documentsPath = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                        let fileExtension = newValue?.pathExtension ?? "pdf"
+                        let savedResumeURL = documentsPath.appendingPathComponent("saved_resume.\(fileExtension)")
+                        
+                        // Only save and parse if this is NOT the saved file location
+                        if newValue?.path != savedResumeURL.path {
+                            saveResumeFile()
+                            Task {
+                                await parseResume()
+                            }
                         }
                     } else if newValue == nil {
                         // File cleared
@@ -141,8 +155,17 @@ struct ProfileView: View {
                 }
             }
             .onAppear {
-                // Load saved resume data first
+                // Load saved resume data first (this sets selectedFile and parsedResumeData)
+                let hadSavedData = parsedResumeData != nil
                 loadSavedResume()
+                
+                // Load saved career archetypes (user's custom selections)
+                loadCareerArchetypes()
+                
+                // If we have parsed resume data but no saved archetypes, detect them
+                if let resumeData = parsedResumeData, careerArchetypes.isEmpty {
+                    careerArchetypes = detectCareerArchetypes(from: resumeData)
+                }
                 
                 // Reset PDF preview loading state when view appears
                 if selectedFile != nil && !shouldLoadPDFPreview {
@@ -151,6 +174,13 @@ struct ProfileView: View {
                         await MainActor.run {
                             shouldLoadPDFPreview = true
                         }
+                    }
+                }
+                
+                // If we loaded saved data but don't have parsed data, parse it
+                if selectedFile != nil && parsedResumeData == nil {
+                    Task {
+                        await parseResume()
                     }
                 }
             }
@@ -179,6 +209,46 @@ struct ProfileView: View {
             } else if let resumeData = parsedResumeData {
                 // Show parsed resume information bubbles
                 VStack(spacing: 12) {
+                    // Career Interests - at the top
+                    if !careerArchetypes.isEmpty {
+                        ParsedInfoBubbleSection(title: "Career Interests", icon: "", color: .blue, onAdd: { showingAddCareerArchetype = true }) {
+                            FlowLayout(spacing: 8) {
+                                ForEach(Array(careerArchetypes.enumerated()), id: \.offset) { index, archetype in
+                                    EditableCareerInterestBubble(
+                                        text: archetype,
+                                        color: .blue,
+                                        onEdit: {
+                                            // Find the current index using the text value to ensure accuracy
+                                            let archetypeToEdit = archetype
+                                            if let currentIndex = careerArchetypes.firstIndex(of: archetypeToEdit) {
+                                                editingCareerArchetypeIndex = currentIndex
+                                            } else {
+                                                editingCareerArchetypeIndex = index
+                                            }
+                                        },
+                                        onDelete: {
+                                            // Find current index before deleting to ensure accuracy
+                                            if let currentIndex = careerArchetypes.firstIndex(of: archetype) {
+                                                careerArchetypes.remove(at: currentIndex)
+                                            } else {
+                                                careerArchetypes.remove(at: index)
+                                            }
+                                            saveCareerArchetypes()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        AddableSectionRow(
+                            title: "Career Interests",
+                            count: careerArchetypes.count,
+                            placeholder: "Add career interests",
+                            onAdd: { showingAddCareerArchetype = true }
+                        )
+                        Divider()
+                    }
+                    
                     // Work Experience
                     if let workExp = resumeData.workExperience, !workExp.isEmpty {
                         ParsedInfoBubbleSection(title: "Work Experience", icon: "", color: .green, onAdd: { showingAddWorkExperience = true }) {
@@ -521,6 +591,38 @@ struct ProfileView: View {
                 }
             }
         }
+        .sheet(isPresented: $showingAddCareerArchetype) {
+            AddCareerArchetypeView(archetypes: $careerArchetypes) {
+                saveCareerArchetypes()
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { 
+                if let index = editingCareerArchetypeIndex {
+                    return index >= 0 && index < careerArchetypes.count
+                }
+                return false
+            },
+            set: { 
+                if !$0 { 
+                    // Reset the index when sheet is dismissed
+                    editingCareerArchetypeIndex = nil
+                }
+            }
+        )) {
+            if let index = editingCareerArchetypeIndex,
+               index >= 0 && index < careerArchetypes.count {
+                EditCareerArchetypeSheet(archetype: careerArchetypes[index]) { updatedArchetype in
+                    // Update the array and reset state
+                    if index >= 0 && index < careerArchetypes.count {
+                        careerArchetypes[index] = updatedArchetype
+                    }
+                    // Reset state immediately to allow immediate re-editing
+                    editingCareerArchetypeIndex = nil
+                    saveCareerArchetypes()
+                }
+            }
+        }
     }
     
     // MARK: - Personal Section
@@ -717,7 +819,7 @@ struct PersonalInfoFieldRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(label)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                     
                     Text(value.isEmpty ? "Not set" : value)
                         .font(.system(size: 14))
@@ -758,7 +860,7 @@ struct AddableSectionRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(title) (\(count))")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(.black)
+                        .foregroundColor(.primary)
                     
                     Text(placeholder)
                         .font(.system(size: 14))
@@ -1047,6 +1149,310 @@ struct EditInterestSheet: View {
     }
 }
 
+// MARK: - Resume Preview Loader View
+struct ResumePreviewLoaderView: View {
+    let parsedResumeData: ResumeData?
+    @Binding var selectedFile: URL?
+    @Binding var fileName: String
+    @Binding var cachedFileSize: String?
+    @Binding var shouldLoadPDFPreview: Bool
+    let onClear: () -> Void
+    let onLoadFileSize: () async -> Void
+    
+    @State private var loadedFile: URL?
+    
+    var body: some View {
+        Group {
+            if let file = loadedFile ?? selectedFile {
+                // Resume Preview Card
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Resume Preview")
+                            .font(.system(size: 18, weight: .semibold))
+                        Spacer()
+                        Button(action: onClear) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.gray)
+                                .font(.system(size: 24))
+                        }
+                    }
+                    
+                    // Actual resume document preview
+                    if file.pathExtension.lowercased() == "pdf" {
+                        // PDF Preview - only load after view appears to prevent freezing
+                        if shouldLoadPDFPreview {
+                            PDFPreviewView(url: file)
+                                .frame(height: 300)
+                                .background(Color(.systemGray5))
+                                .cornerRadius(12)
+                        } else {
+                            // Placeholder while waiting for view to be ready
+                            VStack(spacing: 16) {
+                                ProgressView()
+                                    .scaleEffect(1.2)
+                                Text("Preparing preview...")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(height: 300)
+                            .frame(maxWidth: .infinity)
+                            .background(Color(.systemGray5))
+                            .cornerRadius(12)
+                            .onAppear {
+                                // Defer PDF loading until view is ready
+                                Task {
+                                    try? await Task.sleep(nanoseconds: 200_000_000) // 0.2 seconds
+                                    await MainActor.run {
+                                        shouldLoadPDFPreview = true
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Word document - show file info
+                        let displayFileName = fileName.isEmpty ? file.lastPathComponent : fileName
+                        NavigationLink(destination: ResumePreviewView(fileURL: file, fileName: displayFileName)) {
+                            VStack(spacing: 12) {
+                                Image(systemName: "doc.text.fill")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.blue)
+                                
+                                Text(displayFileName)
+                                    .font(.system(size: 16, weight: .semibold))
+                                
+                                if let fileSize = cachedFileSize {
+                                    Text(fileSize)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("Loading...")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.secondary)
+                                        .task {
+                                            await onLoadFileSize()
+                                        }
+                                }
+                                
+                                Text("Tap to view full document")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.blue)
+                                    .padding(.top, 4)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                            .background(Color(.systemBackground))
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+            } else {
+                // Fallback: Show info card if file doesn't exist
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Current Resume")
+                            .font(.system(size: 18, weight: .semibold))
+                        Spacer()
+                        Button(action: onClear) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.gray)
+                                .font(.system(size: 24))
+                        }
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !fileName.isEmpty {
+                            HStack {
+                                Image(systemName: "doc.text.fill")
+                                    .foregroundColor(.blue)
+                                Text(fileName)
+                                    .font(.system(size: 16, weight: .medium))
+                            }
+                        }
+                        
+                        Text("Resume data is available. Upload a new resume to replace it.")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding()
+                .background(Color(.systemGray6))
+                .cornerRadius(12)
+            }
+        }
+        .onAppear {
+            // Load saved file if not already loaded
+            if selectedFile == nil {
+                let fileManager = FileManager.default
+                if let savedFilePath = UserDefaults.standard.string(forKey: "savedResumeFilePath"),
+                   fileManager.fileExists(atPath: savedFilePath) {
+                    let fileURL = URL(fileURLWithPath: savedFilePath)
+                    loadedFile = fileURL
+                    selectedFile = fileURL
+                    
+                    if fileName.isEmpty {
+                        fileName = UserDefaults.standard.string(forKey: "savedResumeFileName") ?? fileURL.lastPathComponent
+                    }
+                    
+                    // Trigger PDF preview loading
+                    Task {
+                        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                        await MainActor.run {
+                            shouldLoadPDFPreview = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Add Career Interest View
+struct AddCareerArchetypeView: View {
+    @Binding var archetypes: [String]
+    @State private var newArchetype = ""
+    @Environment(\.dismiss) var dismiss
+    let onSave: () -> Void
+    
+    // Predefined archetypes for quick selection
+    let predefinedArchetypes = [
+        "Software Engineer",
+        "Data Analyst",
+        "Product Manager",
+        "Marketing Associate",
+        "Finance Analyst"
+    ]
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Quick Select")) {
+                    ForEach(predefinedArchetypes, id: \.self) { archetype in
+                        Button(action: {
+                            if !archetypes.contains(archetype) {
+                                archetypes.append(archetype)
+                                onSave()
+                            }
+                            dismiss()
+                        }) {
+                            HStack {
+                                Text(archetype)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                if archetypes.contains(archetype) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                Section(header: Text("Custom Interest")) {
+                    TextField("Enter career interest", text: $newArchetype)
+                    Button("Add Custom") {
+                        if !newArchetype.isEmpty && !archetypes.contains(newArchetype) {
+                            archetypes.append(newArchetype)
+                            newArchetype = ""
+                            onSave()
+                        }
+                    }
+                    .disabled(newArchetype.isEmpty || archetypes.contains(newArchetype))
+                }
+            }
+            .navigationTitle("Add Career Interest")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Editing Career Interest Item
+struct EditingCareerInterest: Identifiable {
+    let id = UUID()
+    let index: Int
+    let text: String
+}
+
+// MARK: - Editable Career Interest Bubble
+struct EditableCareerInterestBubble: View {
+    let text: String
+    let color: Color
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    
+    var body: some View {
+        Menu {
+            Button(action: onEdit) {
+                Label("Edit", systemImage: "pencil")
+            }
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
+            }
+        } label: {
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color(.systemGray5))
+                .foregroundColor(.primary)
+                .cornerRadius(8)
+        }
+    }
+}
+
+// MARK: - Edit Career Interest Sheet
+struct EditCareerArchetypeSheet: View {
+    let archetype: String
+    let onSave: (String) -> Void
+    @State private var editedArchetype: String
+    @Environment(\.dismiss) var dismiss
+    
+    init(archetype: String, onSave: @escaping (String) -> Void) {
+        self.archetype = archetype
+        self.onSave = onSave
+        _editedArchetype = State(initialValue: archetype)
+    }
+    
+    var body: some View {
+        NavigationView {
+            Form {
+                TextField("Career Interest", text: $editedArchetype)
+            }
+            .navigationTitle("Edit Career Interest")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Save") {
+                        onSave(editedArchetype)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(editedArchetype.isEmpty)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Edit Coursework Sheet
 struct EditCourseworkSheet: View {
     let coursework: String
@@ -1091,16 +1497,50 @@ extension ProfileView {
     private var filesSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(spacing: 12) {
-                if let file = selectedFile, !fileName.isEmpty {
+                // Show resume preview if file exists OR if parsed resume data exists (indicating a resume was uploaded)
+                // Determine which file to display - check multiple sources
+                let displayFile: URL? = {
+                    // First priority: selectedFile (if set)
+                    if let file = selectedFile {
+                        return file
+                    }
+                    // Second priority: Check UserDefaults for saved file path
+                    let fileManager = FileManager.default
+                    if let savedFilePath = UserDefaults.standard.string(forKey: "savedResumeFilePath"),
+                       fileManager.fileExists(atPath: savedFilePath) {
+                        return URL(fileURLWithPath: savedFilePath)
+                    }
+                    return nil
+                }()
+                
+                // Determine which file name to display
+                let displayFileName: String = {
+                    // First priority: fileName (if set)
+                    if !fileName.isEmpty {
+                        return fileName
+                    }
+                    // Second priority: Check UserDefaults for saved file name
+                    if let savedFileName = UserDefaults.standard.string(forKey: "savedResumeFileName") {
+                        return savedFileName
+                    }
+                    // Third priority: Use file name from displayFile
+                    if let file = displayFile {
+                        return file.lastPathComponent
+                    }
+                    return ""
+                }()
+                
+                // Show preview if we have a file OR if parsed resume data exists (indicating resume was uploaded)
+                if let file = displayFile, !displayFileName.isEmpty {
                     // Resume Preview Card
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Text("Resume Preview")
                                 .font(.system(size: 18, weight: .semibold))
                             Spacer()
-                                        Button(action: {
-                                            clearSavedResume()
-                                        }) {
+                            Button(action: {
+                                clearSavedResume()
+                            }) {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundColor(.gray)
                                     .font(.system(size: 24))
@@ -1140,13 +1580,13 @@ extension ProfileView {
                             }
                         } else {
                             // Word document - show file info
-                            NavigationLink(destination: ResumePreviewView(fileURL: file, fileName: fileName)) {
+                            NavigationLink(destination: ResumePreviewView(fileURL: file, fileName: displayFileName)) {
                                 VStack(spacing: 12) {
                                     Image(systemName: "doc.text.fill")
                                         .font(.system(size: 50))
                                         .foregroundColor(.blue)
                                     
-                                    Text(fileName)
+                                    Text(displayFileName)
                                         .font(.system(size: 16, weight: .semibold))
                                     
                                     if let fileSize = cachedFileSize {
@@ -1182,7 +1622,77 @@ extension ProfileView {
                     .padding()
                     .background(Color(.systemGray6))
                     .cornerRadius(12)
-                } else {
+                    .onAppear {
+                        // Update selectedFile and fileName if they're not set
+                        // This ensures the preview always shows when saved resume exists
+                        if selectedFile == nil {
+                            selectedFile = file
+                        }
+                        if fileName.isEmpty {
+                            fileName = displayFileName
+                        }
+                        // Trigger PDF preview loading if needed
+                        if !shouldLoadPDFPreview {
+                            Task {
+                                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                                await MainActor.run {
+                                    shouldLoadPDFPreview = true
+                                }
+                            }
+                        }
+                    }
+                } else if parsedResumeData != nil {
+                    // If we have parsed data but file isn't loaded yet, show a loading state
+                    // This ensures users know a resume exists even if file loading is delayed
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Resume Preview")
+                                .font(.system(size: 18, weight: .semibold))
+                            Spacer()
+                            Button(action: {
+                                clearSavedResume()
+                            }) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.gray)
+                                    .font(.system(size: 24))
+                            }
+                        }
+                        
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .scaleEffect(1.2)
+                            Text("Loading resume preview...")
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(height: 300)
+                        .frame(maxWidth: .infinity)
+                        .background(Color(.systemGray5))
+                        .cornerRadius(12)
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    .task {
+                        // Try to load the saved file if not already loaded
+                        if selectedFile == nil {
+                            let fileManager = FileManager.default
+                            if let savedFilePath = UserDefaults.standard.string(forKey: "savedResumeFilePath"),
+                               fileManager.fileExists(atPath: savedFilePath) {
+                                let savedFileURL = URL(fileURLWithPath: savedFilePath)
+                                await MainActor.run {
+                                    selectedFile = savedFileURL
+                                    if fileName.isEmpty {
+                                        fileName = UserDefaults.standard.string(forKey: "savedResumeFileName") ?? savedFileURL.lastPathComponent
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Always show upload section below the preview
+                VStack(spacing: 12) {
                     // Upload Resume Button
                     Button(action: {
                         showFilePicker = true
@@ -1192,7 +1702,7 @@ extension ProfileView {
                                 .font(.system(size: 50))
                                 .foregroundColor(.blue)
                             
-                            Text("Upload a Resume")
+                            Text(selectedFile != nil || parsedResumeData != nil ? "Replace Resume" : "Upload a Resume")
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(.blue)
                             
@@ -1330,6 +1840,11 @@ extension ProfileView {
                 parsedResumeData = resumeData
                 // Save parsed resume data
                 saveParsedResumeData(resumeData)
+                // Detect career archetypes from resume data (only if user hasn't customized them)
+                if careerArchetypes.isEmpty {
+                    careerArchetypes = detectCareerArchetypes(from: resumeData)
+                    saveCareerArchetypes()
+                }
             }
         } catch {
             await MainActor.run {
@@ -1581,10 +2096,124 @@ extension ProfileView {
                 let decoder = JSONDecoder()
                 let resumeData = try decoder.decode(ResumeData.self, from: data)
                 parsedResumeData = resumeData
+                // Load saved career archetypes (user's custom selections)
+                loadCareerArchetypes()
+                // If no saved archetypes, detect them from resume data
+                if careerArchetypes.isEmpty {
+                    careerArchetypes = detectCareerArchetypes(from: resumeData)
+                    saveCareerArchetypes()
+                }
                 print("✅ Loaded saved parsed resume data")
             } catch {
                 print("❌ Error loading parsed resume data: \(error.localizedDescription)")
             }
+        }
+    }
+    
+    // MARK: - Career Archetype Detection
+    private func detectCareerArchetypes(from resumeData: ResumeData) -> [String] {
+        var archetypes: Set<String> = []
+        var allText = ""
+        
+        // Collect all text from resume for analysis
+        var skillsText = ""
+        if let skills = resumeData.skills {
+            skillsText = skills.joined(separator: " ").lowercased()
+            allText += skillsText + " "
+        }
+        
+        // Analyze work experience
+        if let workExp = resumeData.workExperience {
+            for exp in workExp {
+                let title = exp.title.lowercased()
+                let company = exp.company.lowercased()
+                let description = (exp.description ?? "").lowercased()
+                allText += title + " " + company + " " + description + " "
+            }
+        }
+        
+        // Analyze education
+        if let education = resumeData.education {
+            for edu in education {
+                let degree = edu.degree.lowercased()
+                let school = edu.school.lowercased()
+                allText += degree + " " + school + " "
+            }
+        }
+        
+        // Analyze projects
+        if let projects = resumeData.projects {
+            for project in projects {
+                let name = project.name.lowercased()
+                let description = (project.description ?? "").lowercased()
+                let technologies = (project.technologies ?? "").lowercased()
+                allText += name + " " + description + " " + technologies + " "
+            }
+        }
+        
+        allText = allText.lowercased()
+        
+        // Software Engineer detection
+        let softwareKeywords = ["software", "developer", "programming", "code", "python", "javascript", "java", "react", "node", "api", "backend", "frontend", "full stack", "web development", "mobile app", "ios", "android", "swift", "kotlin", "git", "github", "agile", "scrum", "software engineer", "software developer", "programmer", "coding", "algorithm", "data structure", "database", "sql", "nosql", "docker", "kubernetes", "aws", "cloud", "devops"]
+        let softwareScore = softwareKeywords.reduce(0) { score, keyword in
+            score + (allText.contains(keyword) ? 1 : 0)
+        }
+        if softwareScore >= 3 {
+            archetypes.insert("Software Engineer")
+        }
+        
+        // Data Analyst detection
+        let dataAnalystKeywords = ["data analyst", "data analysis", "data science", "analytics", "sql", "excel", "tableau", "power bi", "python", "r", "statistics", "statistical", "data visualization", "dashboard", "reporting", "business intelligence", "bi", "etl", "data mining", "machine learning", "ml", "data modeling", "regression", "forecasting", "data warehouse", "big data", "hadoop", "spark"]
+        let dataAnalystScore = dataAnalystKeywords.reduce(0) { score, keyword in
+            score + (allText.contains(keyword) ? 1 : 0)
+        }
+        if dataAnalystScore >= 3 {
+            archetypes.insert("Data Analyst")
+        }
+        
+        // Product Manager detection
+        let productManagerKeywords = ["product manager", "product management", "product strategy", "roadmap", "agile", "scrum", "kanban", "user story", "requirements", "stakeholder", "cross-functional", "go-to-market", "gtm", "launch", "feature", "prioritization", "user experience", "ux", "user research", "market research", "competitive analysis", "kpi", "metrics", "analytics", "a/b testing", "mvp", "minimum viable product"]
+        let productManagerScore = productManagerKeywords.reduce(0) { score, keyword in
+            score + (allText.contains(keyword) ? 1 : 0)
+        }
+        if productManagerScore >= 3 {
+            archetypes.insert("Product Manager")
+        }
+        
+        // Marketing Associate detection
+        let marketingKeywords = ["marketing", "digital marketing", "social media", "content marketing", "seo", "sem", "ppc", "google ads", "facebook ads", "email marketing", "campaign", "brand", "branding", "public relations", "pr", "event", "trade show", "market research", "customer acquisition", "lead generation", "conversion", "roi", "analytics", "google analytics", "advertising", "copywriting", "creative", "graphic design", "canva", "adobe"]
+        let marketingScore = marketingKeywords.reduce(0) { score, keyword in
+            score + (allText.contains(keyword) ? 1 : 0)
+        }
+        if marketingScore >= 3 {
+            archetypes.insert("Marketing Associate")
+        }
+        
+        // Finance Analyst detection
+        let financeKeywords = ["finance", "financial", "accounting", "cpa", "cfa", "financial analysis", "financial modeling", "valuation", "budget", "forecasting", "p&l", "profit and loss", "balance sheet", "cash flow", "financial reporting", "gaap", "ifrs", "audit", "tax", "taxation", "investment", "portfolio", "risk management", "compliance", "sox", "sarbanes-oxley", "excel", "financial statement", "revenue", "expense", "cost", "margin", "ebitda"]
+        let financeScore = financeKeywords.reduce(0) { score, keyword in
+            score + (allText.contains(keyword) ? 1 : 0)
+        }
+        if financeScore >= 3 {
+            archetypes.insert("Finance Analyst")
+        }
+        
+        return Array(archetypes).sorted()
+    }
+    
+    // MARK: - Save Career Archetypes
+    private func saveCareerArchetypes() {
+        // Save career archetypes to UserDefaults
+        if let data = try? JSONEncoder().encode(careerArchetypes) {
+            UserDefaults.standard.set(data, forKey: "savedCareerArchetypes")
+        }
+    }
+    
+    private func loadCareerArchetypes() {
+        // Load saved career archetypes from UserDefaults
+        if let data = UserDefaults.standard.data(forKey: "savedCareerArchetypes"),
+           let savedArchetypes = try? JSONDecoder().decode([String].self, from: data) {
+            careerArchetypes = savedArchetypes
         }
     }
     

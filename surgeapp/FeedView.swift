@@ -14,6 +14,7 @@ struct FeedView: View {
     @State private var emailContacts: [EmailContact] = []
     @State private var loading = false
     @State private var error: String?
+    @State private var careerInterests: [String] = []
     
     var body: some View {
         NavigationView {
@@ -120,11 +121,13 @@ struct FeedView: View {
             }
             .navigationTitle("Feed")
             .onAppear {
+                loadCareerInterests()
                 Task {
                     await fetchData()
                 }
             }
             .refreshable {
+                loadCareerInterests()
                 await fetchData()
             }
         }
@@ -137,17 +140,57 @@ struct FeedView: View {
         do {
             switch selectedTab {
             case 0:
-                // Fetch Jobs
-                let posts = try await SupabaseService.shared.fetchJobPosts()
+                // Fetch Jobs from multiple sources, filtered by career interests
+                var allPosts: [JobPost] = []
+                
+                // Fetch from Supabase (existing jobs)
+                do {
+                    let supabasePosts = try await SupabaseService.shared.fetchJobPosts()
+                    // Filter Supabase posts by career interests
+                    let filteredPosts = filterJobsByCareerInterests(supabasePosts, careerInterests: careerInterests)
+                    allPosts.append(contentsOf: filteredPosts)
+                } catch {
+                    print("⚠️ Failed to fetch from Supabase: \(error.localizedDescription)")
+                }
+                
+                // Fetch from job scraping service (job boards, company pages, ATS)
+                do {
+                    print("🔍 Fetching jobs from backend...")
+                    print("🔍 Career interests: \(careerInterests)")
+                    let scrapedPosts = try await JobScrapingService.shared.fetchJobsFromBackend(
+                        careerInterests: careerInterests
+                    )
+                    print("✅ Fetched \(scrapedPosts.count) jobs from backend")
+                    allPosts.append(contentsOf: scrapedPosts)
+                } catch {
+                    print("⚠️ Backend API error: \(error.localizedDescription)")
+                    // If backend API is not available, try direct scraping (limited)
+                    print("⚠️ Attempting direct scraping as fallback...")
+                    do {
+                        let directPosts = try await JobScrapingService.shared.fetchJobsFromAllSources(
+                            careerInterests: careerInterests
+                        )
+                        print("✅ Fetched \(directPosts.count) jobs from direct scraping")
+                        allPosts.append(contentsOf: directPosts)
+                    } catch {
+                        print("⚠️ Direct scraping also failed: \(error.localizedDescription)")
+                    }
+                }
+                
                 await MainActor.run {
                     var uniquePosts: [JobPost] = []
                     var seenIds = Set<String>()
                     
-                    for post in posts {
+                    for post in allPosts {
                         if !seenIds.contains(post.id) {
                             seenIds.insert(post.id)
                             uniquePosts.append(post)
                         }
+                    }
+                    
+                    // Sort by posted date (most recent first)
+                    uniquePosts.sort { post1, post2 in
+                        post1.postedDate > post2.postedDate
                     }
                     
                     self.jobPosts = uniquePosts
@@ -196,6 +239,34 @@ struct FeedView: View {
             await MainActor.run {
                 self.error = error.localizedDescription
                 self.loading = false
+            }
+        }
+    }
+    
+    // MARK: - Load Career Interests
+    private func loadCareerInterests() {
+        if let data = UserDefaults.standard.data(forKey: "savedCareerArchetypes"),
+           let savedInterests = try? JSONDecoder().decode([String].self, from: data) {
+            careerInterests = savedInterests
+        }
+    }
+    
+    // MARK: - Filter Jobs by Career Interests
+    private func filterJobsByCareerInterests(_ jobs: [JobPost], careerInterests: [String]) -> [JobPost] {
+        guard !careerInterests.isEmpty else {
+            return jobs
+        }
+        
+        return jobs.filter { job in
+            // Check if job title, description, or company matches any career interest
+            let jobText = "\(job.title) \(job.company) \(job.description ?? "")".lowercased()
+            
+            return careerInterests.contains { interest in
+                let interestLower = interest.lowercased()
+                // Check for exact match or partial match in job text
+                return jobText.contains(interestLower) ||
+                       job.title.lowercased().contains(interestLower) ||
+                       (job.description?.lowercased().contains(interestLower) ?? false)
             }
         }
     }
