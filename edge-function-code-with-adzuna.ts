@@ -1,0 +1,229 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const url = new URL(req.url)
+    const keywords = url.searchParams.get('keywords') || ''
+    const location = url.searchParams.get('location') || ''
+    const careerInterestsParam = url.searchParams.get('career_interests')
+    
+    let careerInterests: string[] = []
+    if (careerInterestsParam) {
+      try {
+        careerInterests = JSON.parse(decodeURIComponent(careerInterestsParam))
+      } catch {
+        try {
+          careerInterests = JSON.parse(careerInterestsParam)
+        } catch {
+          careerInterests = []
+        }
+      }
+    }
+
+    const allJobs = []
+
+    // Fetch from Adzuna API (primary source)
+    // If career interests exist, search for each one separately (Adzuna doesn't support OR)
+    if (careerInterests.length > 0) {
+      console.log(`🔍 Searching Adzuna for ${careerInterests.length} career interests`)
+      // Search for each career interest separately
+      for (const interest of careerInterests) {
+        try {
+          const adzunaJobs = await fetchFromAdzunaAPI(interest, location)
+          console.log(`✅ Fetched ${adzunaJobs.length} jobs for "${interest}"`)
+          if (adzunaJobs.length > 0) {
+            allJobs.push(...adzunaJobs)
+          }
+          // Small delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 200))
+        } catch (err) {
+          console.error(`❌ Adzuna API failed for "${interest}":`, err)
+        }
+      }
+    } else {
+      // Use keywords or default search
+      const searchQuery = keywords || 'software engineer'
+      try {
+        const adzunaJobs = await fetchFromAdzunaAPI(searchQuery, location)
+        console.log(`✅ Fetched ${adzunaJobs.length} jobs from Adzuna API for "${searchQuery}"`)
+        if (adzunaJobs.length > 0) {
+          allJobs.push(...adzunaJobs)
+        } else {
+          console.log('⚠️ Adzuna API returned 0 jobs')
+        }
+      } catch (err) {
+        console.error('❌ Adzuna API failed:', err)
+        console.error('❌ Error details:', JSON.stringify(err))
+      }
+    }
+
+    // Only return sample data if Adzuna completely failed AND we have no jobs
+    if (allJobs.length === 0) {
+      console.log('⚠️ No jobs from Adzuna, returning sample data as fallback')
+      allJobs.push(...getSampleJobs(location))
+    }
+
+    // Deduplicate jobs
+    const uniqueJobs = deduplicateJobs(allJobs)
+
+    // Filter by career interests if provided
+    let filteredJobs = uniqueJobs
+    if (careerInterests.length > 0) {
+      filteredJobs = uniqueJobs.filter(job => {
+        const jobText = `${job.title} ${job.company} ${job.description || ''}`.toLowerCase()
+        return careerInterests.some(interest => {
+          const interestLower = interest.toLowerCase()
+          return jobText.includes(interestLower) || 
+                 job.title.toLowerCase().includes(interestLower)
+        })
+      })
+      
+      // If filtering resulted in 0 jobs, return all jobs
+      if (filteredJobs.length === 0) {
+        filteredJobs = uniqueJobs
+      }
+    }
+
+    return new Response(
+      JSON.stringify(filteredJobs),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    )
+  } catch (error) {
+    console.error('❌ Error in edge function:', error)
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+})
+
+// Fetch jobs from Adzuna API
+async function fetchFromAdzunaAPI(keywords: string, location: string): Promise<any[]> {
+  // Get API keys from environment variables (recommended) or use defaults
+  const APP_ID = Deno.env.get('ADZUNA_APP_ID') || 'ff850947'
+  const APP_KEY = Deno.env.get('ADZUNA_APP_KEY') || '114516221e332fe7ddb772224a68e0bb'
+  
+  try {
+    // Adzuna API endpoint for US jobs
+    const country = 'us' // Change to 'uk', 'ca', 'au', etc. for other countries
+    
+    // Build URL - use location if provided, otherwise don't include where parameter
+    let url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?app_id=${APP_ID}&app_key=${APP_KEY}&results_per_page=50&what=${encodeURIComponent(keywords)}&sort_by=date`
+    
+    // Only add location if it's a specific city/state, not "United States"
+    if (location && location.toLowerCase() !== 'united states' && location.toLowerCase() !== 'us') {
+      url += `&where=${encodeURIComponent(location)}`
+    }
+    
+    console.log(`🔍 Fetching from Adzuna: "${keywords}"${location ? ` in ${location}` : ''}`)
+    console.log(`🔗 URL: ${url.replace(APP_KEY, '***')}`) // Hide API key in logs
+    
+    const response = await fetch(url)
+    
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Adzuna API error: ${response.status} - ${errorText}`)
+    }
+
+    const data = await response.json()
+    
+    console.log(`📊 Adzuna API response: count=${data.count}, results=${data.results?.length || 0}`)
+    
+    if (!data.results || data.results.length === 0) {
+      console.log('⚠️ No results from Adzuna API')
+      return []
+    }
+    
+    // Transform Adzuna jobs to our JobPost format
+    const transformedJobs = data.results.map((job: any) => ({
+      id: `adzuna_${job.id}`,
+      title: job.title || 'Job Title',
+      company: job.company?.display_name || job.company?.name || 'Company not specified',
+      location: job.location?.display_name || job.location?.area?.join(', ') || location || 'Location not specified',
+      posted_date: job.created ? new Date(job.created).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      description: job.description || null,
+      url: job.redirect_url || job.url || null,
+      salary: formatSalary(job.salary_min, job.salary_max),
+      job_type: job.contract_type || job.contract_time || null,
+    }))
+    
+    console.log(`✅ Transformed ${transformedJobs.length} jobs from Adzuna`)
+    return transformedJobs
+  } catch (error) {
+    console.error('❌ Adzuna API error:', error)
+    console.error('❌ Error message:', error.message)
+    console.error('❌ Error stack:', error.stack)
+    throw error
+  }
+}
+
+// Format salary from Adzuna API
+function formatSalary(min: number | null, max: number | null): string | null {
+  if (!min && !max) return null
+  
+  if (min && max) {
+    return `$${min.toLocaleString()} - $${max.toLocaleString()}`
+  } else if (min) {
+    return `$${min.toLocaleString()}+`
+  } else if (max) {
+    return `Up to $${max.toLocaleString()}`
+  }
+  
+  return null
+}
+
+// Sample jobs as fallback
+function getSampleJobs(location: string): any[] {
+  return [
+    {
+      id: "sample_1",
+      title: "Software Engineer",
+      company: "Tech Corp",
+      location: location || "San Francisco, CA",
+      posted_date: new Date().toISOString().split('T')[0],
+      description: "We are looking for a software engineer with experience in Swift, iOS development, and modern app architecture.",
+      url: "https://example.com/job/1",
+      salary: "$120,000 - $150,000",
+      job_type: "Full-time"
+    },
+    {
+      id: "sample_2",
+      title: "Data Analyst",
+      company: "Analytics Inc",
+      location: location || "Remote",
+      posted_date: new Date().toISOString().split('T')[0],
+      description: "Join our data team to analyze user behavior and drive product decisions.",
+      url: "https://example.com/job/2",
+      salary: null,
+      job_type: "Full-time"
+    }
+  ]
+}
+
+// Deduplicate jobs based on title, company, and location
+function deduplicateJobs(jobs: any[]): any[] {
+  const seen = new Set<string>()
+  const unique: any[] = []
+
+  for (const job of jobs) {
+    const key = `${job.title}_${job.company}_${job.location}`.toLowerCase().replace(/\s+/g, '_')
+    if (!seen.has(key)) {
+      seen.add(key)
+      unique.push(job)
+    }
+  }
+
+  return unique
+}
+
