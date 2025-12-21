@@ -39,7 +39,7 @@ serve(async (req) => {
       for (const interest of careerInterests) {
         try {
           const adzunaJobs = await fetchFromAdzunaAPI(interest, location)
-          console.log(`✅ Fetched ${adzunaJobs.length} jobs for "${interest}"`)
+          console.log(`✅ Fetched ${adzunaJobs.length} jobs from Adzuna for "${interest}"`)
           if (adzunaJobs.length > 0) {
             allJobs.push(...adzunaJobs)
           }
@@ -63,6 +63,35 @@ serve(async (req) => {
       } catch (err) {
         console.error('❌ Adzuna API failed:', err)
         console.error('❌ Error details:', JSON.stringify(err))
+      }
+    }
+
+    // Fetch from The Muse API (secondary source)
+    if (careerInterests.length > 0) {
+      console.log(`🔍 Searching The Muse for ${careerInterests.length} career interests`)
+      for (const interest of careerInterests) {
+        try {
+          const museJobs = await fetchFromTheMuseAPI(interest, location)
+          console.log(`✅ Fetched ${museJobs.length} jobs from The Muse for "${interest}"`)
+          if (museJobs.length > 0) {
+            allJobs.push(...museJobs)
+          }
+          // Small delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 200))
+        } catch (err) {
+          console.error(`❌ The Muse API failed for "${interest}":`, err)
+        }
+      }
+    } else {
+      const searchQuery = keywords || 'software engineer'
+      try {
+        const museJobs = await fetchFromTheMuseAPI(searchQuery, location)
+        console.log(`✅ Fetched ${museJobs.length} jobs from The Muse API for "${searchQuery}"`)
+        if (museJobs.length > 0) {
+          allJobs.push(...museJobs)
+        }
+      } catch (err) {
+        console.error('❌ The Muse API failed:', err)
       }
     }
 
@@ -166,6 +195,102 @@ async function fetchFromAdzunaAPI(keywords: string, location: string): Promise<a
     console.error('❌ Error stack:', error.stack)
     throw error
   }
+}
+
+// Fetch jobs from The Muse API
+async function fetchFromTheMuseAPI(keywords: string, location: string): Promise<any[]> {
+  // Get API key from environment variables or use default
+  const API_KEY = Deno.env.get('THE_MUSE_API_KEY') || 'e176261d566e51adae621988bd6fcc8538f804c0525037c9684085e08f0131e8'
+  
+  try {
+    // The Muse API endpoint
+    let url = `https://www.themuse.com/api/public/jobs?page=1&api_key=${API_KEY}`
+    
+    // Add category/keywords
+    if (keywords) {
+      // The Muse uses categories, so try to map keywords to categories
+      const category = mapKeywordsToCategory(keywords)
+      if (category) {
+        url += `&category=${encodeURIComponent(category)}`
+      }
+    }
+    
+    // Add location if provided
+    if (location && location.toLowerCase() !== 'united states' && location.toLowerCase() !== 'us') {
+      url += `&location=${encodeURIComponent(location)}`
+    }
+    
+    console.log(`🔍 Fetching from The Muse: "${keywords}"${location ? ` in ${location}` : ''}`)
+    
+    const response = await fetch(url)
+    
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`The Muse API error: ${response.status} - ${errorText}`)
+    }
+
+    const data = await response.json()
+    
+    if (!data.results || data.results.length === 0) {
+      console.log('⚠️ No results from The Muse API')
+      return []
+    }
+    
+    // Transform The Muse jobs to our JobPost format
+    const transformedJobs = data.results
+      .filter((job: any) => {
+        // Filter by keywords if provided (The Muse doesn't have great keyword search)
+        if (keywords) {
+          const jobText = `${job.name} ${job.company?.name || ''} ${job.contents || ''}`.toLowerCase()
+          return jobText.includes(keywords.toLowerCase())
+        }
+        return true
+      })
+      .map((job: any) => ({
+        id: `themuse_${job.id}`,
+        title: job.name || 'Job Title',
+        company: job.company?.name || 'Company not specified',
+        location: job.locations?.[0]?.name || location || 'Location not specified',
+        posted_date: job.publication_date ? new Date(job.publication_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        description: job.contents || null,
+        url: job.refs?.landing_page || job.url || null,
+        salary: null, // The Muse doesn't always provide salary in API
+        job_type: job.type || null,
+      }))
+    
+    console.log(`✅ Transformed ${transformedJobs.length} jobs from The Muse`)
+    return transformedJobs
+  } catch (error) {
+    console.error('❌ The Muse API error:', error)
+    return [] // Return empty array instead of throwing
+  }
+}
+
+// Map keywords to The Muse categories
+function mapKeywordsToCategory(keywords: string): string | null {
+  const keywordLower = keywords.toLowerCase()
+  
+  // The Muse categories
+  if (keywordLower.includes('software') || keywordLower.includes('engineer') || keywordLower.includes('developer')) {
+    return 'Software Engineering'
+  }
+  if (keywordLower.includes('data') || keywordLower.includes('analyst')) {
+    return 'Data Science'
+  }
+  if (keywordLower.includes('product') || keywordLower.includes('manager')) {
+    return 'Product'
+  }
+  if (keywordLower.includes('marketing')) {
+    return 'Marketing'
+  }
+  if (keywordLower.includes('finance') || keywordLower.includes('accounting')) {
+    return 'Finance'
+  }
+  if (keywordLower.includes('design') || keywordLower.includes('designer')) {
+    return 'Design'
+  }
+  
+  return null // No specific category match
 }
 
 // Format salary from Adzuna API
