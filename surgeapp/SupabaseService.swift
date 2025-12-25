@@ -314,6 +314,92 @@ class SupabaseService {
         }
     }
     
+    // MARK: - Update Application Status
+    func updateApplicationStatus(_ applicationId: String, status: String) async throws {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/applications?id=eq.\(applicationId)") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("public", forHTTPHeaderField: "Accept-Profile")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        
+        let updateData: [String: Any] = ["status": status]
+        request.httpBody = try JSONSerialization.data(withJSONObject: updateData)
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SupabaseError.requestFailed
+        }
+        
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw SupabaseError.httpError(statusCode: httpResponse.statusCode, message: "Failed to update application: \(errorMessage)")
+        }
+    }
+    
+    // MARK: - Supabase Storage Upload
+    func uploadResumeToStorage(fileURL: URL, fileName: String) async throws -> String {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        // Read file data
+        let fileData = try Data(contentsOf: fileURL)
+        
+        // Create unique path for the file
+        let userId = UUID().uuidString // In production, use actual user ID
+        let filePath = "resumes/\(userId)/\(fileName)"
+        
+        // Upload to Supabase Storage
+        guard let url = URL(string: "\(supabaseURL)/storage/v1/object/resumes/\(filePath)") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+        
+        // Determine content type
+        let contentType: String
+        if fileName.hasSuffix(".pdf") {
+            contentType = "application/pdf"
+        } else if fileName.hasSuffix(".docx") || fileName.hasSuffix(".doc") {
+            contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        } else {
+            contentType = "application/octet-stream"
+        }
+        
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue("upsert", forHTTPHeaderField: "x-upsert")
+        request.httpBody = fileData
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SupabaseError.requestFailed
+        }
+        
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw SupabaseError.httpError(statusCode: httpResponse.statusCode, message: "Failed to upload resume: \(errorMessage)")
+        }
+        
+        // Return public URL
+        return "\(supabaseURL)/storage/v1/object/public/resumes/\(filePath)"
+    }
+    
     // MARK: - Resume Data
     func insertResumeData(_ resumeData: ResumeData) async throws {
         guard supabaseURL != "YOUR_SUPABASE_URL" else {

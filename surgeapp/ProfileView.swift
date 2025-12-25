@@ -743,6 +743,9 @@ struct ProfileView: View {
         }
         .background(Color(.systemBackground))
         .onAppear {
+            // Load saved profile data
+            loadProfileData()
+            
             // Initialize from Google Sign-In if available
             if let user = signInService.currentUser {
                 let fullName = user.profile?.name ?? ""
@@ -786,7 +789,21 @@ struct ProfileView: View {
                     phone = resumeData.phone ?? ""
                 }
             }
+            
+            // Save initial data
+            saveProfileData()
         }
+        .onChange(of: firstName) { _, _ in saveProfileData() }
+        .onChange(of: middleName) { _, _ in saveProfileData() }
+        .onChange(of: lastName) { _, _ in saveProfileData() }
+        .onChange(of: preferredName) { _, _ in saveProfileData() }
+        .onChange(of: title) { _, _ in saveProfileData() }
+        .onChange(of: location) { _, _ in saveProfileData() }
+        .onChange(of: personalEmail) { _, _ in saveProfileData() }
+        .onChange(of: phone) { _, _ in saveProfileData() }
+        .onChange(of: linkedInURL) { _, _ in saveProfileData() }
+        .onChange(of: githubURL) { _, _ in saveProfileData() }
+        .onChange(of: portfolioURL) { _, _ in saveProfileData() }
     }
 }
 
@@ -2239,6 +2256,36 @@ extension ProfileView {
         UserDefaults.standard.removeObject(forKey: "savedParsedResumeData")
         
         print("✅ Cleared saved resume data")
+    }
+    
+    // MARK: - Save Profile Data
+    private func saveProfileData() {
+        UserDefaults.standard.set(firstName, forKey: "profile_firstName")
+        UserDefaults.standard.set(middleName, forKey: "profile_middleName")
+        UserDefaults.standard.set(lastName, forKey: "profile_lastName")
+        UserDefaults.standard.set(preferredName, forKey: "profile_preferredName")
+        UserDefaults.standard.set(title, forKey: "profile_title")
+        UserDefaults.standard.set(location, forKey: "profile_location")
+        UserDefaults.standard.set(personalEmail, forKey: "profile_personalEmail")
+        UserDefaults.standard.set(phone, forKey: "profile_phone")
+        UserDefaults.standard.set(linkedInURL, forKey: "profile_linkedInURL")
+        UserDefaults.standard.set(githubURL, forKey: "profile_githubURL")
+        UserDefaults.standard.set(portfolioURL, forKey: "profile_portfolioURL")
+    }
+    
+    // MARK: - Load Profile Data
+    private func loadProfileData() {
+        firstName = UserDefaults.standard.string(forKey: "profile_firstName") ?? ""
+        middleName = UserDefaults.standard.string(forKey: "profile_middleName") ?? ""
+        lastName = UserDefaults.standard.string(forKey: "profile_lastName") ?? ""
+        preferredName = UserDefaults.standard.string(forKey: "profile_preferredName") ?? ""
+        title = UserDefaults.standard.string(forKey: "profile_title") ?? ""
+        location = UserDefaults.standard.string(forKey: "profile_location") ?? ""
+        personalEmail = UserDefaults.standard.string(forKey: "profile_personalEmail") ?? ""
+        phone = UserDefaults.standard.string(forKey: "profile_phone") ?? ""
+        linkedInURL = UserDefaults.standard.string(forKey: "profile_linkedInURL") ?? ""
+        githubURL = UserDefaults.standard.string(forKey: "profile_githubURL") ?? ""
+        portfolioURL = UserDefaults.standard.string(forKey: "profile_portfolioURL") ?? ""
     }
 }
 

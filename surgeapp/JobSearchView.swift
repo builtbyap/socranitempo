@@ -309,6 +309,7 @@ struct JobPostCard: View {
     let post: JobPost
     let isSaved: Bool
     let onToggleSave: () -> Void
+    var onSimpleApply: (() -> Void)? = nil
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -406,27 +407,48 @@ struct JobPostCard: View {
             Divider()
                 .padding(.horizontal, 16)
             
-            // Action Button
-            if let url = post.url, !url.isEmpty {
-                Button(action: {
-                    if let url = URL(string: url) {
-                        UIApplication.shared.open(url)
+            // Action Buttons
+            VStack(spacing: 12) {
+                // Simple Apply Button
+                if let onSimpleApply = onSimpleApply {
+                    Button(action: onSimpleApply) {
+                        HStack {
+                            Spacer()
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Simple Apply")
+                                .font(.system(size: 16, weight: .semibold))
+                            Spacer()
+                        }
+                        .foregroundColor(.white)
+                        .padding(.vertical, 14)
+                        .background(Color.green)
+                        .cornerRadius(10)
                     }
-                }) {
-                    HStack {
-                        Spacer()
-                        Text("View Job")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                        Spacer()
-                    }
-                    .padding(.vertical, 14)
-                    .background(Color.blue)
-                    .cornerRadius(10)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                
+                // View Job Button
+                if let url = post.url, !url.isEmpty {
+                    Button(action: {
+                        if let url = URL(string: url) {
+                            UIApplication.shared.open(url)
+                        }
+                    }) {
+                        HStack {
+                            Spacer()
+                            Text("View Job")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                            Spacer()
+                        }
+                        .padding(.vertical, 14)
+                        .background(Color.blue)
+                        .cornerRadius(10)
+                    }
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
         .background(Color(.systemBackground))
         .cornerRadius(16)

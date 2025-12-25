@@ -15,6 +15,8 @@ struct FeedView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var careerInterests: [String] = []
+    @State private var showingSimpleApply: JobPost?
+    @State private var applicationData: ApplicationData?
     
     var body: some View {
         NavigationView {
@@ -69,7 +71,18 @@ struct FeedView: View {
                                     .padding(.top, 100)
                                 } else {
                                     ForEach(jobPosts) { post in
-                                        JobPostCard(post: post, isSaved: false, onToggleSave: {})
+                                        JobPostCard(
+                                            post: post,
+                                            isSaved: false,
+                                            onToggleSave: {},
+                                            onSimpleApply: {
+                                                // Get profile data and show review
+                                                let profileData = SimpleApplyService.shared.getUserProfileData()
+                                                let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
+                                                applicationData = appData
+                                                showingSimpleApply = post
+                                            }
+                                        )
                                     }
                                 }
                             } else if selectedTab == 1 {
@@ -129,6 +142,14 @@ struct FeedView: View {
             .refreshable {
                 loadCareerInterests()
                 await fetchData()
+            }
+            .sheet(isPresented: Binding(
+                get: { showingSimpleApply != nil },
+                set: { if !$0 { showingSimpleApply = nil } }
+            )) {
+                if let job = showingSimpleApply, let appData = applicationData {
+                    SimpleApplyReviewView(job: job, applicationData: appData)
+                }
             }
         }
     }

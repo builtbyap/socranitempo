@@ -95,6 +95,35 @@ serve(async (req) => {
       }
     }
 
+    // Fetch from Apify LinkedIn Scraper (third source)
+    if (careerInterests.length > 0) {
+      console.log(`🔍 Searching LinkedIn via Apify for ${careerInterests.length} career interests`)
+      for (const interest of careerInterests) {
+        try {
+          const linkedInJobs = await fetchFromApifyLinkedIn(interest, location)
+          console.log(`✅ Fetched ${linkedInJobs.length} jobs from LinkedIn for "${interest}"`)
+          if (linkedInJobs.length > 0) {
+            allJobs.push(...linkedInJobs)
+          }
+          // Longer delay for Apify (more resource intensive)
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        } catch (err) {
+          console.error(`❌ Apify LinkedIn scraper failed for "${interest}":`, err)
+        }
+      }
+    } else {
+      const searchQuery = keywords || 'software engineer'
+      try {
+        const linkedInJobs = await fetchFromApifyLinkedIn(searchQuery, location)
+        console.log(`✅ Fetched ${linkedInJobs.length} jobs from LinkedIn for "${searchQuery}"`)
+        if (linkedInJobs.length > 0) {
+          allJobs.push(...linkedInJobs)
+        }
+      } catch (err) {
+        console.error('❌ Apify LinkedIn scraper failed:', err)
+      }
+    }
+
     // Only return sample data if Adzuna completely failed AND we have no jobs
     if (allJobs.length === 0) {
       console.log('⚠️ No jobs from Adzuna, returning sample data as fallback')
@@ -291,6 +320,113 @@ function mapKeywordsToCategory(keywords: string): string | null {
   }
   
   return null // No specific category match
+}
+
+// Fetch jobs from Apify LinkedIn Scraper
+async function fetchFromApifyLinkedIn(keywords: string, location: string): Promise<any[]> {
+  // Get API token from environment variables
+  const APIFY_TOKEN = Deno.env.get('APIFY_TOKEN')
+  
+  if (!APIFY_TOKEN) {
+    console.error('❌ APIFY_TOKEN not set in environment variables')
+    return []
+  }
+  const ACTOR_ID = 'worldunboxer~rapid-linkedin-scraper'
+  
+  try {
+    console.log(`🔍 Starting Apify LinkedIn scraper for: "${keywords}"${location ? ` in ${location}` : ''}`)
+    
+    // Step 1: Start the actor run
+    const runUrl = `https://api.apify.com/v2/acts/${ACTOR_ID}/runs?token=${APIFY_TOKEN}`
+    const runResponse = await fetch(runUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        job_title: keywords,
+        job_type: 'F', // F for full-time, P for part-time
+        jobs_entries: 25, // Number of jobs to fetch
+        location: location || '',
+        start_jobs: 0
+      })
+    })
+
+    if (!runResponse.ok) {
+      const errorText = await runResponse.text()
+      throw new Error(`Apify run failed: ${runResponse.status} - ${errorText}`)
+    }
+
+    const runData = await runResponse.json()
+    const runId = runData.data.id
+    
+    console.log(`⏳ Apify run started: ${runId}, waiting for completion...`)
+
+    // Step 2: Wait for the run to complete (with timeout)
+    const maxWaitTime = 60000 // 60 seconds
+    const startTime = Date.now()
+    let runStatus = 'RUNNING'
+    
+    while (runStatus === 'RUNNING' && (Date.now() - startTime) < maxWaitTime) {
+      await new Promise(resolve => setTimeout(resolve, 2000)) // Check every 2 seconds
+      
+      const statusUrl = `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_TOKEN}`
+      const statusResponse = await fetch(statusUrl)
+      
+      if (statusResponse.ok) {
+        const statusData = await statusResponse.json()
+        runStatus = statusData.data.status
+        
+        if (runStatus === 'SUCCEEDED') {
+          break
+        } else if (runStatus === 'FAILED' || runStatus === 'ABORTED') {
+          throw new Error(`Apify run ${runStatus.toLowerCase()}`)
+        }
+      }
+    }
+
+    if (runStatus !== 'SUCCEEDED') {
+      throw new Error('Apify run timed out or failed')
+    }
+
+    console.log(`✅ Apify run completed, fetching dataset...`)
+
+    // Step 3: Get the dataset
+    const datasetUrl = `https://api.apify.com/v2/datasets/${runData.data.defaultDatasetId}/items?token=${APIFY_TOKEN}`
+    const datasetResponse = await fetch(datasetUrl)
+
+    if (!datasetResponse.ok) {
+      throw new Error(`Failed to fetch dataset: ${datasetResponse.status}`)
+    }
+
+    const datasetData = await datasetResponse.json()
+    
+    if (!datasetData || datasetData.length === 0) {
+      console.log('⚠️ No results from Apify LinkedIn scraper')
+      return []
+    }
+
+    console.log(`📊 Apify returned ${datasetData.length} jobs`)
+
+    // Step 4: Transform Apify LinkedIn jobs to our JobPost format
+    const transformedJobs = datasetData.map((job: any) => ({
+      id: `linkedin_apify_${job.job_id || job.id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      title: job.job_title || job.title || 'Job Title',
+      company: job.company_name || job.company || 'Company not specified',
+      location: job.location || location || 'Location not specified',
+      posted_date: job.posted_date ? new Date(job.posted_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+      description: job.job_description || job.description || null,
+      url: job.apply_url || job.job_url || job.url || null,
+      salary: job.salary_range || job.salary || null,
+      job_type: job.employment_type || job.job_type || null,
+    }))
+
+    console.log(`✅ Transformed ${transformedJobs.length} jobs from Apify LinkedIn`)
+    return transformedJobs
+  } catch (error) {
+    console.error('❌ Apify LinkedIn scraper error:', error)
+    return [] // Return empty array instead of throwing
+  }
 }
 
 // Format salary from Adzuna API

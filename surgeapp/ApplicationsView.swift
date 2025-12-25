@@ -75,6 +75,11 @@ struct ApplicationsView: View {
                     await fetchApplications()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ApplicationStatusUpdated"))) { _ in
+                Task {
+                    await fetchApplications()
+                }
+            }
         }
     }
     
@@ -99,6 +104,8 @@ struct ApplicationsView: View {
 
 struct ApplicationCard: View {
     let application: Application
+    @State private var showingStatusUpdate = false
+    @State private var isUpdating = false
     
     var statusColor: Color {
         switch application.status {
@@ -146,14 +153,18 @@ struct ApplicationCard: View {
                 
                 Spacer()
                 
-                // Status Badge
-                Text(application.status.capitalized)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(statusColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(statusColor.opacity(0.1))
-                    .cornerRadius(12)
+                // Status Badge (tappable)
+                Button(action: {
+                    showingStatusUpdate = true
+                }) {
+                    Text(application.status.capitalized)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(statusColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(statusColor.opacity(0.1))
+                        .cornerRadius(12)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -169,6 +180,13 @@ struct ApplicationCard: View {
                 Text("Applied \(formatDate(application.appliedDate))")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                if isUpdating {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -180,6 +198,34 @@ struct ApplicationCard: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(Color(.systemGray5), lineWidth: 0.5)
         )
+        .sheet(isPresented: $showingStatusUpdate) {
+            StatusUpdateView(application: application, onUpdate: { newStatus in
+                updateStatus(newStatus)
+            })
+        }
+    }
+    
+    private func updateStatus(_ newStatus: String) {
+        isUpdating = true
+        Task {
+            do {
+                try await SupabaseService.shared.updateApplicationStatus(
+                    applicationId: application.id,
+                    status: newStatus
+                )
+                await MainActor.run {
+                    isUpdating = false
+                    showingStatusUpdate = false
+                }
+                // Refresh the applications list
+                NotificationCenter.default.post(name: NSNotification.Name("ApplicationStatusUpdated"), object: nil)
+            } catch {
+                await MainActor.run {
+                    isUpdating = false
+                }
+                print("❌ Failed to update status: \(error.localizedDescription)")
+            }
+        }
     }
     
     private func formatDate(_ dateString: String) -> String {
