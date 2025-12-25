@@ -32,180 +32,91 @@ serve(async (req) => {
 
     const allJobs = []
 
-    // Fetch from Adzuna API (primary source)
-    // If career interests exist, search for each one separately (Adzuna doesn't support OR)
+    // Build search queries from career interests
+    const searchQueries: string[] = []
     if (careerInterests.length > 0) {
-      console.log(`🔍 Searching Adzuna for ${careerInterests.length} career interests`)
-      // Search for each career interest separately
+      // Search each career interest separately
       for (const interest of careerInterests) {
-        try {
-          // Search for regular positions
-          const adzunaJobs = await fetchFromAdzunaAPI(interest, location)
-          console.log(`✅ Fetched ${adzunaJobs.length} jobs from Adzuna for "${interest}"`)
-          if (adzunaJobs.length > 0) {
-            allJobs.push(...adzunaJobs)
-          }
-          
-          // Also search for internships
-          const internshipQuery = `${interest} internship`
-          const internshipJobs = await fetchFromAdzunaAPI(internshipQuery, location)
-          console.log(`✅ Fetched ${internshipJobs.length} internships from Adzuna for "${interest}"`)
-          if (internshipJobs.length > 0) {
-            allJobs.push(...internshipJobs)
-          }
-          
-          // Small delay to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 200))
-        } catch (err) {
-          console.error(`❌ Adzuna API failed for "${interest}":`, err)
-        }
+        searchQueries.push(interest)
+        // Also add internship variant
+        searchQueries.push(`${interest} internship`)
       }
     } else {
-      // Use keywords or default search
-      const searchQuery = keywords || 'software engineer'
-      try {
-        // Search for regular positions
-        const adzunaJobs = await fetchFromAdzunaAPI(searchQuery, location)
-        console.log(`✅ Fetched ${adzunaJobs.length} jobs from Adzuna API for "${searchQuery}"`)
-        if (adzunaJobs.length > 0) {
-          allJobs.push(...adzunaJobs)
-        }
-        
-        // Also search for internships
-        const internshipQuery = `${searchQuery} internship`
-        const internshipJobs = await fetchFromAdzunaAPI(internshipQuery, location)
-        console.log(`✅ Fetched ${internshipJobs.length} internships from Adzuna API`)
-        if (internshipJobs.length > 0) {
-          allJobs.push(...internshipJobs)
-        }
-      } catch (err) {
-        console.error('❌ Adzuna API failed:', err)
-        console.error('❌ Error details:', JSON.stringify(err))
-      }
+      searchQueries.push(keywords || 'software engineer')
     }
-
-    // Fetch from The Muse API (secondary source)
-    if (careerInterests.length > 0) {
-      console.log(`🔍 Searching The Muse for ${careerInterests.length} career interests`)
-      for (const interest of careerInterests) {
-        try {
-          // Search for regular positions
-          const museJobs = await fetchFromTheMuseAPI(interest, location)
-          console.log(`✅ Fetched ${museJobs.length} jobs from The Muse for "${interest}"`)
-          if (museJobs.length > 0) {
-            allJobs.push(...museJobs)
-          }
-          
-          // Also search for internships
-          const internshipQuery = `${interest} internship`
-          const internshipJobs = await fetchFromTheMuseAPI(internshipQuery, location)
-          console.log(`✅ Fetched ${internshipJobs.length} internships from The Muse for "${interest}"`)
-          if (internshipJobs.length > 0) {
-            allJobs.push(...internshipJobs)
-          }
-          
-          // Small delay to avoid rate limiting
-          await new Promise(resolve => setTimeout(resolve, 200))
-        } catch (err) {
-          console.error(`❌ The Muse API failed for "${interest}":`, err)
-        }
-      }
-    } else {
-      const searchQuery = keywords || 'software engineer'
-      try {
-        // Search for regular positions
-        const museJobs = await fetchFromTheMuseAPI(searchQuery, location)
-        console.log(`✅ Fetched ${museJobs.length} jobs from The Muse API for "${searchQuery}"`)
-        if (museJobs.length > 0) {
-          allJobs.push(...museJobs)
-        }
-        
-        // Also search for internships
-        const internshipQuery = `${searchQuery} internship`
-        const internshipJobs = await fetchFromTheMuseAPI(internshipQuery, location)
-        console.log(`✅ Fetched ${internshipJobs.length} internships from The Muse API`)
-        if (internshipJobs.length > 0) {
-          allJobs.push(...internshipJobs)
-        }
-      } catch (err) {
-        console.error('❌ The Muse API failed:', err)
-      }
+    
+    // Limit queries to avoid timeout
+    const queriesToSearch = searchQueries.slice(0, 3)
+    
+    console.log(`🌐 Starting web scraping from job boards and ATS systems...`)
+    
+    // Scrape from multiple sources in parallel
+    const scrapingPromises: Promise<any[]>[] = []
+    
+    for (const query of queriesToSearch) {
+      // Job Boards
+      scrapingPromises.push(
+        scrapeIndeed(query, location).catch(err => {
+          console.error(`❌ Indeed scraping failed for "${query}":`, err)
+          return []
+        }),
+        scrapeMonster(query, location).catch(err => {
+          console.error(`❌ Monster scraping failed for "${query}":`, err)
+          return []
+        }),
+        scrapeGlassdoor(query, location).catch(err => {
+          console.error(`❌ Glassdoor scraping failed for "${query}":`, err)
+          return []
+        }),
+        scrapeZipRecruiter(query, location).catch(err => {
+          console.error(`❌ ZipRecruiter scraping failed for "${query}":`, err)
+          return []
+        })
+      )
+      
+      // ATS Systems
+      scrapingPromises.push(
+        scrapeGreenhouse(query, location).catch(err => {
+          console.error(`❌ Greenhouse scraping failed for "${query}":`, err)
+          return []
+        }),
+        scrapeLever(query, location).catch(err => {
+          console.error(`❌ Lever scraping failed for "${query}":`, err)
+          return []
+        }),
+        scrapeWorkday(query, location).catch(err => {
+          console.error(`❌ Workday scraping failed for "${query}":`, err)
+          return []
+        })
+      )
+      
+      // Small delay between queries to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 300))
     }
-
-    // Fetch from Web Scraping (Indeed, Monster, Glassdoor, ZipRecruiter)
-    // This is faster and more reliable than Apify
-    if (allJobs.length < 100) { // Only scrape if we need more jobs
-      console.log(`🌐 Starting web scraping from job boards...`)
-      
-      // Build search queries from career interests
-      const searchQueries: string[] = []
-      if (careerInterests.length > 0) {
-        // Search each career interest separately
-        for (const interest of careerInterests) {
-          searchQueries.push(interest)
-          // Also add internship variant
-          searchQueries.push(`${interest} internship`)
-        }
-      } else {
-        searchQueries.push(keywords || 'software engineer')
-      }
-      
-      // Limit to first 2 queries to avoid timeout
-      const queriesToSearch = searchQueries.slice(0, 2)
-      
-      // Scrape from multiple job boards in parallel
-      const scrapingPromises: Promise<any[]>[] = []
-      
-      for (const query of queriesToSearch) {
-        scrapingPromises.push(
-          scrapeIndeed(query, location).catch(err => {
-            console.error(`❌ Indeed scraping failed for "${query}":`, err)
-            return []
-          }),
-          scrapeMonster(query, location).catch(err => {
-            console.error(`❌ Monster scraping failed for "${query}":`, err)
-            return []
-          }),
-          scrapeGlassdoor(query, location).catch(err => {
-            console.error(`❌ Glassdoor scraping failed for "${query}":`, err)
-            return []
-          }),
-          scrapeZipRecruiter(query, location).catch(err => {
-            console.error(`❌ ZipRecruiter scraping failed for "${query}":`, err)
-            return []
-          })
+    
+    // Wait for all scraping to complete (with timeout)
+    try {
+      const scrapingResults = await Promise.race([
+        Promise.all(scrapingPromises),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Scraping timeout')), 30000) // 30 second timeout
         )
-        
-        // Small delay between queries to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 500))
-      }
+      ]) as any[][]
       
-      // Wait for all scraping to complete (with timeout)
-      try {
-        const scrapingResults = await Promise.race([
-          Promise.all(scrapingPromises),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Scraping timeout')), 20000) // 20 second timeout
-          )
-        ]) as any[][]
-        
-        for (const jobs of scrapingResults) {
-          if (jobs && jobs.length > 0) {
-            allJobs.push(...jobs)
-            console.log(`✅ Added ${jobs.length} jobs from web scraping`)
-          }
+      for (const jobs of scrapingResults) {
+        if (jobs && jobs.length > 0) {
+          allJobs.push(...jobs)
+          console.log(`✅ Added ${jobs.length} jobs from scraping`)
         }
-      } catch (timeoutErr) {
-        console.log(`⏱️ Web scraping timed out (this is normal - continuing with existing jobs)`)
-        // Continue with jobs we already have
       }
-    } else {
-      console.log('ℹ️ Skipping web scraping (already have enough jobs)')
+    } catch (timeoutErr) {
+      console.log(`⏱️ Web scraping timed out (continuing with jobs found so far)`)
+      // Continue with jobs we already have
     }
 
-    // Only return sample data if Adzuna completely failed AND we have no jobs
+    // Only return sample data if all scraping failed
     if (allJobs.length === 0) {
-      console.log('⚠️ No jobs from Adzuna, returning sample data as fallback')
+      console.log('⚠️ No jobs found from scraping, returning sample data as fallback')
       allJobs.push(...getSampleJobs(location))
     }
 
@@ -245,160 +156,227 @@ serve(async (req) => {
   }
 })
 
-// Fetch jobs from Adzuna API
-async function fetchFromAdzunaAPI(keywords: string, location: string): Promise<any[]> {
-  // Get API keys from environment variables (recommended) or use defaults
-  const APP_ID = Deno.env.get('ADZUNA_APP_ID') || 'ff850947'
-  const APP_KEY = Deno.env.get('ADZUNA_APP_KEY') || '114516221e332fe7ddb772224a68e0bb'
+// Scrape Greenhouse (ATS)
+async function scrapeGreenhouse(keywords: string, location: string): Promise<any[]> {
+  const jobs: any[] = []
   
   try {
-    // Adzuna API endpoint for US jobs
-    const country = 'us' // Change to 'uk', 'ca', 'au', etc. for other countries
+    // Greenhouse has a public API endpoint for many companies
+    // We'll try to scrape from known Greenhouse job boards
+    // Pattern: boards.greenhouse.io/COMPANY_NAME or COMPANY_NAME.greenhouse.io
     
-    // Build URL - use location if provided, otherwise don't include where parameter
-    let url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?app_id=${APP_ID}&app_key=${APP_KEY}&results_per_page=50&what=${encodeURIComponent(keywords)}&sort_by=date`
+    // List of popular companies using Greenhouse (you can expand this)
+    const greenhouseCompanies = [
+      'stripe', 'airbnb', 'reddit', 'pinterest', 'shopify', 
+      'uber', 'lyft', 'doordash', 'instacart', 'coinbase'
+    ]
     
-    // Only add location if it's a specific city/state, not "United States"
-    if (location && location.toLowerCase() !== 'united states' && location.toLowerCase() !== 'us') {
-      url += `&where=${encodeURIComponent(location)}`
-    }
-    
-    console.log(`🔍 Fetching from Adzuna: "${keywords}"${location ? ` in ${location}` : ''}`)
-    console.log(`🔗 URL: ${url.replace(APP_KEY, '***')}`) // Hide API key in logs
-    
-    const response = await fetch(url)
-    
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`Adzuna API error: ${response.status} - ${errorText}`)
-    }
-
-    const data = await response.json()
-    
-    console.log(`📊 Adzuna API response: count=${data.count}, results=${data.results?.length || 0}`)
-    
-    if (!data.results || data.results.length === 0) {
-      console.log('⚠️ No results from Adzuna API')
-      return []
-    }
-    
-    // Transform Adzuna jobs to our JobPost format
-    const transformedJobs = data.results.map((job: any) => ({
-      id: `adzuna_${job.id}`,
-      title: job.title || 'Job Title',
-      company: job.company?.display_name || job.company?.name || 'Company not specified',
-      location: job.location?.display_name || job.location?.area?.join(', ') || location || 'Location not specified',
-      posted_date: job.created ? new Date(job.created).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      description: job.description || null,
-      url: job.redirect_url || job.url || null,
-      salary: formatSalary(job.salary_min, job.salary_max),
-      job_type: job.contract_type || job.contract_time || null,
-    }))
-    
-    console.log(`✅ Transformed ${transformedJobs.length} jobs from Adzuna`)
-    return transformedJobs
-  } catch (error) {
-    console.error('❌ Adzuna API error:', error)
-    console.error('❌ Error message:', error.message)
-    console.error('❌ Error stack:', error.stack)
-    throw error
-  }
-}
-
-// Fetch jobs from The Muse API
-async function fetchFromTheMuseAPI(keywords: string, location: string): Promise<any[]> {
-  // Get API key from environment variables or use default
-  const API_KEY = Deno.env.get('THE_MUSE_API_KEY') || 'e176261d566e51adae621988bd6fcc8538f804c0525037c9684085e08f0131e8'
-  
-  try {
-    // The Muse API endpoint
-    let url = `https://www.themuse.com/api/public/jobs?page=1&api_key=${API_KEY}`
-    
-    // Add category/keywords
-    if (keywords) {
-      // The Muse uses categories, so try to map keywords to categories
-      const category = mapKeywordsToCategory(keywords)
-      if (category) {
-        url += `&category=${encodeURIComponent(category)}`
-      }
-    }
-    
-    // Add location if provided
-    if (location && location.toLowerCase() !== 'united states' && location.toLowerCase() !== 'us') {
-      url += `&location=${encodeURIComponent(location)}`
-    }
-    
-    console.log(`🔍 Fetching from The Muse: "${keywords}"${location ? ` in ${location}` : ''}`)
-    
-    const response = await fetch(url)
-    
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`The Muse API error: ${response.status} - ${errorText}`)
-    }
-
-    const data = await response.json()
-    
-    if (!data.results || data.results.length === 0) {
-      console.log('⚠️ No results from The Muse API')
-      return []
-    }
-    
-    // Transform The Muse jobs to our JobPost format
-    const transformedJobs = data.results
-      .filter((job: any) => {
-        // Filter by keywords if provided (The Muse doesn't have great keyword search)
-        if (keywords) {
-          const jobText = `${job.name} ${job.company?.name || ''} ${job.contents || ''}`.toLowerCase()
-          return jobText.includes(keywords.toLowerCase())
+    for (const company of greenhouseCompanies.slice(0, 5)) { // Limit to 5 to avoid timeout
+      try {
+        // Try Greenhouse API endpoint first
+        const apiUrl = `https://boards-api.greenhouse.io/v1/boards/${company}/jobs`
+        const response = await fetch(apiUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          if (data.jobs && Array.isArray(data.jobs)) {
+            for (const job of data.jobs) {
+              // Filter by keywords if provided
+              if (keywords) {
+                const jobText = `${job.title} ${job.content || ''}`.toLowerCase()
+                if (!jobText.includes(keywords.toLowerCase())) {
+                  continue
+                }
+              }
+              
+              jobs.push({
+                id: `greenhouse_${company}_${job.id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                title: job.title || 'Job Title',
+                company: job.departments?.[0]?.name || company,
+                location: job.location?.name || location || 'Location not specified',
+                posted_date: job.updated_at ? new Date(job.updated_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                description: job.content || null,
+                url: job.absolute_url || `https://boards.greenhouse.io/${company}/jobs/${job.id}`,
+                salary: null,
+                job_type: null,
+              })
+            }
+          }
         }
-        return true
-      })
-      .map((job: any) => ({
-        id: `themuse_${job.id}`,
-        title: job.name || 'Job Title',
-        company: job.company?.name || 'Company not specified',
-        location: job.locations?.[0]?.name || location || 'Location not specified',
-        posted_date: job.publication_date ? new Date(job.publication_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-        description: job.contents || null,
-        url: job.refs?.landing_page || job.url || null,
-        salary: null, // The Muse doesn't always provide salary in API
-        job_type: job.type || null,
-      }))
+      } catch (err) {
+        // Skip this company if it fails
+        continue
+      }
+      
+      // Small delay between companies
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
     
-    console.log(`✅ Transformed ${transformedJobs.length} jobs from The Muse`)
-    return transformedJobs
+    console.log(`✅ Scraped ${jobs.length} jobs from Greenhouse`)
   } catch (error) {
-    console.error('❌ The Muse API error:', error)
-    return [] // Return empty array instead of throwing
+    console.error('❌ Greenhouse scraping error:', error)
   }
+  
+  return jobs
 }
 
-// Map keywords to The Muse categories
-function mapKeywordsToCategory(keywords: string): string | null {
-  const keywordLower = keywords.toLowerCase()
+// Scrape Lever (ATS)
+async function scrapeLever(keywords: string, location: string): Promise<any[]> {
+  const jobs: any[] = []
   
-  // The Muse categories
-  if (keywordLower.includes('software') || keywordLower.includes('engineer') || keywordLower.includes('developer')) {
-    return 'Software Engineering'
-  }
-  if (keywordLower.includes('data') || keywordLower.includes('analyst')) {
-    return 'Data Science'
-  }
-  if (keywordLower.includes('product') || keywordLower.includes('manager')) {
-    return 'Product'
-  }
-  if (keywordLower.includes('marketing')) {
-    return 'Marketing'
-  }
-  if (keywordLower.includes('finance') || keywordLower.includes('accounting')) {
-    return 'Finance'
-  }
-  if (keywordLower.includes('design') || keywordLower.includes('designer')) {
-    return 'Design'
+  try {
+    // Lever has a public API endpoint
+    // Pattern: jobs.lever.co/COMPANY_NAME or api.lever.co/v0/postings/COMPANY_NAME
+    
+    const leverCompanies = [
+      'lever', 'netflix', 'dropbox', 'slack', 'square',
+      'twitch', 'github', 'asana', 'notion', 'figma'
+    ]
+    
+    for (const company of leverCompanies.slice(0, 5)) {
+      try {
+        const apiUrl = `https://api.lever.co/v0/postings/${company}`
+        const response = await fetch(apiUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          if (data && Array.isArray(data)) {
+            for (const job of data) {
+              // Filter by keywords if provided
+              if (keywords) {
+                const jobText = `${job.text} ${job.descriptionPlain || ''}`.toLowerCase()
+                if (!jobText.includes(keywords.toLowerCase())) {
+                  continue
+                }
+              }
+              
+              jobs.push({
+                id: `lever_${company}_${job.id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                title: job.text || 'Job Title',
+                company: company,
+                location: job.categories?.location || location || 'Location not specified',
+                posted_date: job.createdAt ? new Date(job.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                description: job.descriptionPlain || null,
+                url: job.hostedUrl || job.applyUrl || `https://jobs.lever.co/${company}/${job.id}`,
+                salary: null,
+                job_type: job.categories?.commitment || null,
+              })
+            }
+          }
+        }
+      } catch (err) {
+        continue
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+    
+    console.log(`✅ Scraped ${jobs.length} jobs from Lever`)
+  } catch (error) {
+    console.error('❌ Lever scraping error:', error)
   }
   
-  return null // No specific category match
+  return jobs
+}
+
+// Scrape Workday (ATS)
+async function scrapeWorkday(keywords: string, location: string): Promise<any[]> {
+  const jobs: any[] = []
+  
+  try {
+    // Workday is more complex - companies use different subdomains
+    // Pattern: COMPANY.wd3.myworkdayjobs.com or COMPANY.myworkdayjobs.com
+    
+    const workdayCompanies = [
+      'apple', 'microsoft', 'amazon', 'google', 'meta',
+      'nvidia', 'oracle', 'salesforce', 'adobe', 'intel'
+    ]
+    
+    for (const company of workdayCompanies.slice(0, 3)) { // Limit to 3 (Workday is slower)
+      try {
+        // Try common Workday URL patterns
+        const workdayUrls = [
+          `https://${company}.wd3.myworkdayjobs.com/${company}_Careers`,
+          `https://${company}.myworkdayjobs.com/${company}_Careers`
+        ]
+        
+        for (const workdayUrl of workdayUrls) {
+          try {
+            const response = await fetch(workdayUrl, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              }
+            })
+            
+            if (response.ok) {
+              const html = await response.text()
+              const $ = load(html)
+              
+              // Workday uses specific data attributes and structures
+              $('[data-automation-id="jobTitle"], .job-title, [data-testid="job-title"]').each((i: number, element: any) => {
+                try {
+                  const $el = $(element)
+                  const title = $el.text().trim()
+                  
+                  // Filter by keywords
+                  if (keywords && !title.toLowerCase().includes(keywords.toLowerCase())) {
+                    return
+                  }
+                  
+                  const jobUrl = $el.attr('href') || $el.find('a').attr('href')
+                  const fullUrl = jobUrl && !jobUrl.startsWith('http') 
+                    ? `${workdayUrl}${jobUrl}` 
+                    : jobUrl
+                  
+                  // Try to find location and other details
+                  const locationText = $el.closest('[data-automation-id="jobPosting"]').find('[data-automation-id="jobLocation"]').text().trim() || location
+                  
+                  jobs.push({
+                    id: `workday_${company}_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    title: title || 'Job Title',
+                    company: company,
+                    location: locationText || 'Location not specified',
+                    posted_date: new Date().toISOString().split('T')[0],
+                    description: null,
+                    url: fullUrl || null,
+                    salary: null,
+                    job_type: null,
+                  })
+                } catch (err) {
+                  // Skip individual job parsing errors
+                }
+              })
+              
+              // If we found jobs, break (don't try other URL pattern)
+              if (jobs.length > 0) {
+                break
+              }
+            }
+          } catch (err) {
+            continue
+          }
+        }
+      } catch (err) {
+        continue
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 500)) // Longer delay for Workday
+    }
+    
+    console.log(`✅ Scraped ${jobs.length} jobs from Workday`)
+  } catch (error) {
+    console.error('❌ Workday scraping error:', error)
+  }
+  
+  return jobs
 }
 
 // Web Scraping Functions for Job Boards

@@ -60,6 +60,17 @@ struct JobFiltersView: View {
                         Text("$150,000+").tag(150000 as Int?)
                         Text("$200,000+").tag(200000 as Int?)
                     }
+                    
+                    Picker("Maximum Salary", selection: $filters.maxSalary) {
+                        Text("Any").tag(nil as Int?)
+                        Text("Up to $75,000").tag(75000 as Int?)
+                        Text("Up to $100,000").tag(100000 as Int?)
+                        Text("Up to $125,000").tag(125000 as Int?)
+                        Text("Up to $150,000").tag(150000 as Int?)
+                        Text("Up to $200,000").tag(200000 as Int?)
+                        Text("Up to $250,000").tag(250000 as Int?)
+                        Text("Up to $300,000").tag(300000 as Int?)
+                    }
                 }
                 
                 // Experience Level Section
@@ -138,6 +149,7 @@ struct JobFilters {
     var locationTypes: Set<LocationType> = []
     var location: String = ""
     var minSalary: Int? = nil
+    var maxSalary: Int? = nil
     var experienceLevels: Set<ExperienceLevel> = []
     var datePosted: DatePostedFilter? = nil
     var companySizes: Set<CompanySize> = []
@@ -147,6 +159,7 @@ struct JobFilters {
         !locationTypes.isEmpty ||
         !location.isEmpty ||
         minSalary != nil ||
+        maxSalary != nil ||
         !experienceLevels.isEmpty ||
         datePosted != nil ||
         !companySizes.isEmpty
@@ -199,16 +212,49 @@ struct JobFilters {
             }
         }
         
-        // Filter by minimum salary
-        if let minSalary = minSalary {
+        // Filter by salary range (minimum and maximum)
+        if minSalary != nil || maxSalary != nil {
             filtered = filtered.filter { job in
                 guard let salary = job.salary else { return false }
-                // Extract numbers from salary string (e.g., "$120,000 - $150,000" -> 120000)
-                let numbers = salary.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
-                if let salaryValue = Int(numbers) {
-                    return salaryValue >= minSalary
+                
+                // Extract salary range from string (e.g., "$120,000 - $150,000")
+                // Try to extract both min and max, or just a single value
+                let salaryLower = salary.lowercased()
+                let numbers = salary.components(separatedBy: CharacterSet.decimalDigits.inverted).filter { !$0.isEmpty }
+                
+                // Try to parse range (e.g., "120000" and "150000" from "$120,000 - $150,000")
+                var minValue: Int?
+                var maxValue: Int?
+                
+                if numbers.count >= 2 {
+                    // Has range: use first as min, last as max
+                    if let first = Int(numbers[0]), let last = Int(numbers[numbers.count - 1]) {
+                        minValue = min(first, last)
+                        maxValue = max(first, last)
+                    }
+                } else if numbers.count == 1 {
+                    // Single value: use as both min and max
+                    if let value = Int(numbers[0]) {
+                        minValue = value
+                        maxValue = value
+                    }
                 }
-                return false
+                
+                // Check minimum salary filter
+                if let minSalary = minSalary {
+                    guard let jobMin = minValue, jobMin >= minSalary else {
+                        return false
+                    }
+                }
+                
+                // Check maximum salary filter
+                if let maxSalary = maxSalary {
+                    guard let jobMax = maxValue, jobMax <= maxSalary else {
+                        return false
+                    }
+                }
+                
+                return true
             }
         }
         

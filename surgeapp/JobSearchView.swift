@@ -311,6 +311,8 @@ struct JobPostCard: View {
     let onToggleSave: () -> Void
     var onSimpleApply: (() -> Void)? = nil
     
+    @State private var isExpanded = false
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header Section
@@ -407,6 +409,189 @@ struct JobPostCard: View {
             Divider()
                 .padding(.horizontal, 16)
             
+            // Expanded Details Section (sorce.jobs style)
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 0) {
+                    Divider()
+                        .padding(.horizontal, 16)
+                    
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Job Description Section
+                        if let description = post.description, !description.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("About this role")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(.primary)
+                                
+                                ScrollView {
+                                    Text(description)
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.primary)
+                                        .lineSpacing(4)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .frame(maxHeight: 300)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.top, 20)
+                        }
+                        
+                        // Key Information Grid
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Details")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.primary)
+                                .padding(.horizontal, 16)
+                            
+                            VStack(spacing: 0) {
+                                // Salary
+                                if let salary = post.salary {
+                                    HStack(alignment: .top, spacing: 16) {
+                                        Image(systemName: "dollarsign.circle.fill")
+                                            .foregroundColor(.green)
+                                            .font(.system(size: 18))
+                                            .frame(width: 24)
+                                        
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Salary")
+                                                .font(.system(size: 13))
+                                                .foregroundColor(.secondary)
+                                            Text(salary)
+                                                .font(.system(size: 15, weight: .medium))
+                                                .foregroundColor(.primary)
+                                        }
+                                        
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    
+                                    Divider()
+                                        .padding(.leading, 56)
+                                }
+                                
+                                // Job Type
+                                if let jobType = post.jobType {
+                                    HStack(alignment: .top, spacing: 16) {
+                                        Image(systemName: "clock.fill")
+                                            .foregroundColor(.orange)
+                                            .font(.system(size: 18))
+                                            .frame(width: 24)
+                                        
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Job Type")
+                                                .font(.system(size: 13))
+                                                .foregroundColor(.secondary)
+                                            Text(jobType)
+                                                .font(.system(size: 15, weight: .medium))
+                                                .foregroundColor(.primary)
+                                        }
+                                        
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    
+                                    Divider()
+                                        .padding(.leading, 56)
+                                }
+                                
+                                // Location
+                                HStack(alignment: .top, spacing: 16) {
+                                    Image(systemName: "location.fill")
+                                        .foregroundColor(.blue)
+                                        .font(.system(size: 18))
+                                        .frame(width: 24)
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Location")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(.secondary)
+                                        Text(post.location)
+                                            .font(.system(size: 15, weight: .medium))
+                                            .foregroundColor(.primary)
+                                    }
+                                    
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                
+                                if post.url != nil {
+                                    Divider()
+                                        .padding(.leading, 56)
+                                }
+                                
+                                // Posted Date
+                                HStack(alignment: .top, spacing: 16) {
+                                    Image(systemName: "calendar")
+                                        .foregroundColor(.purple)
+                                        .font(.system(size: 18))
+                                        .frame(width: 24)
+                                    
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Posted")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(.secondary)
+                                        Text(formatDate(post.postedDate))
+                                            .font(.system(size: 15, weight: .medium))
+                                            .foregroundColor(.primary)
+                                    }
+                                    
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                
+                                // Application URL
+                                if let url = post.url, !url.isEmpty {
+                                    Divider()
+                                        .padding(.leading, 56)
+                                    
+                                    HStack(alignment: .top, spacing: 16) {
+                                        Image(systemName: "link")
+                                            .foregroundColor(.blue)
+                                            .font(.system(size: 18))
+                                            .frame(width: 24)
+                                        
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("Apply")
+                                                .font(.system(size: 13))
+                                                .foregroundColor(.secondary)
+                                            Button(action: {
+                                                if let url = URL(string: url) {
+                                                    UIApplication.shared.open(url)
+                                                }
+                                            }) {
+                                                HStack(spacing: 4) {
+                                                    Text("View on company website")
+                                                        .font(.system(size: 15, weight: .medium))
+                                                    Image(systemName: "arrow.up.right.square")
+                                                        .font(.system(size: 13))
+                                                }
+                                                .foregroundColor(.blue)
+                                            }
+                                        }
+                                        
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                }
+                            }
+                            .background(Color(.systemBackground))
+                        }
+                        .padding(.top, 8)
+                        .padding(.bottom, 20)
+                    }
+                    .background(Color(.systemGray6))
+                }
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .top)),
+                    removal: .opacity.combined(with: .move(edge: .top))
+                ))
+            }
+            
             // Action Buttons
             VStack(spacing: 12) {
                 // Simple Apply Button
@@ -427,24 +612,25 @@ struct JobPostCard: View {
                     }
                 }
                 
-                // View Job Button
-                if let url = post.url, !url.isEmpty {
-                    Button(action: {
-                        if let url = URL(string: url) {
-                            UIApplication.shared.open(url)
-                        }
-                    }) {
-                        HStack {
-                            Spacer()
-                            Text("View Job")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                            Spacer()
-                        }
-                        .padding(.vertical, 14)
-                        .background(Color.blue)
-                        .cornerRadius(10)
+                // View Job Button (Toggle Expansion)
+                Button(action: {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        isExpanded.toggle()
                     }
+                }) {
+                    HStack {
+                        Spacer()
+                        Text(isExpanded ? "Hide Details" : "View Job")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.white)
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                        Spacer()
+                    }
+                    .padding(.vertical, 14)
+                    .background(Color.blue)
+                    .cornerRadius(10)
                 }
             }
             .padding(.horizontal, 16)
