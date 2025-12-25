@@ -129,8 +129,13 @@ class SimpleApplyService {
         var resumePublicURL: String? = applicationData.resumeURL
         
         if let localResumePath = applicationData.resumeURL,
-           FileManager.default.fileExists(atPath: localResumePath),
-           let fileURL = URL(string: localResumePath) ?? URL(fileURLWithPath: localResumePath) {
+           FileManager.default.fileExists(atPath: localResumePath) {
+            let fileURL: URL
+            if let url = URL(string: localResumePath), url.scheme != nil {
+                fileURL = url
+            } else {
+                fileURL = URL(fileURLWithPath: localResumePath)
+            }
             do {
                 let fileName = fileURL.lastPathComponent
                 resumePublicURL = try await SupabaseService.shared.uploadResumeToStorage(

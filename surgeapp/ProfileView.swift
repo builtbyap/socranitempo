@@ -698,6 +698,33 @@ struct ProfileView: View {
             Divider()
             
             PersonalInfoFieldRow(label: "Portfolio", value: $portfolioURL, keyboardType: .URL)
+            Divider()
+            
+            // Application Settings
+            PersonalInfoSectionHeader(title: "Application Settings")
+            
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Auto-Apply to Jobs")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.primary)
+                    
+                    Text("Automatically apply to company career pages (like sorce.jobs)")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Toggle("", isOn: Binding(
+                    get: { UserDefaults.standard.bool(forKey: "autoApplyEnabled") },
+                    set: { UserDefaults.standard.set($0, forKey: "autoApplyEnabled") }
+                ))
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 12)
+            .background(Color(.systemBackground))
+            Divider()
             
             // Account Actions
             VStack(spacing: 12) {

@@ -141,11 +141,8 @@ class FormAutoFillHelper {
             if let description = exp.description {
                 dict["description"] = description
             }
-            if let startDate = exp.startDate {
-                dict["startDate"] = startDate
-            }
-            if let endDate = exp.endDate {
-                dict["endDate"] = endDate
+            if let duration = exp.duration {
+                dict["duration"] = duration
             }
             return dict
         }
@@ -164,9 +161,6 @@ class FormAutoFillHelper {
             ]
             if let year = edu.year {
                 dict["year"] = year
-            }
-            if let gpa = edu.gpa {
-                dict["gpa"] = gpa
             }
             return dict
         }

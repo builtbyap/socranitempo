@@ -326,7 +326,29 @@ class JobScrapingService {
         request.setValue(Config.supabaseKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(Config.supabaseKey)", forHTTPHeaderField: "Authorization")
         
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // Increase timeout for Edge Function (it may take time to scrape from multiple sources)
+        request.timeoutInterval = 120.0 // 2 minutes timeout
+        
+        // Create a URLSession with longer timeout configuration
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 120.0 // 2 minutes
+        configuration.timeoutIntervalForResource = 120.0 // 2 minutes
+        let session = URLSession(configuration: configuration)
+        
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as NSError {
+            if error.code == NSURLErrorTimedOut {
+                print("⏱️ Request timed out after 120 seconds")
+                print("💡 The Edge Function may be taking longer due to multiple API calls")
+                print("💡 Consider optimizing the Edge Function or reducing the number of sources")
+                throw JobScrapingError.httpError(statusCode: 408, message: "Request timed out. The backend is processing multiple job sources, which may take longer.")
+            } else {
+                print("❌ Network error: \(error.localizedDescription)")
+                throw JobScrapingError.requestFailed
+            }
+        }
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw JobScrapingError.requestFailed

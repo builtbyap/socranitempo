@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { load } from "https://esm.sh/cheerio@1.0.0-rc.12?target=deno"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,11 +39,21 @@ serve(async (req) => {
       // Search for each career interest separately
       for (const interest of careerInterests) {
         try {
+          // Search for regular positions
           const adzunaJobs = await fetchFromAdzunaAPI(interest, location)
           console.log(`✅ Fetched ${adzunaJobs.length} jobs from Adzuna for "${interest}"`)
           if (adzunaJobs.length > 0) {
             allJobs.push(...adzunaJobs)
           }
+          
+          // Also search for internships
+          const internshipQuery = `${interest} internship`
+          const internshipJobs = await fetchFromAdzunaAPI(internshipQuery, location)
+          console.log(`✅ Fetched ${internshipJobs.length} internships from Adzuna for "${interest}"`)
+          if (internshipJobs.length > 0) {
+            allJobs.push(...internshipJobs)
+          }
+          
           // Small delay to avoid rate limiting
           await new Promise(resolve => setTimeout(resolve, 200))
         } catch (err) {
@@ -53,12 +64,19 @@ serve(async (req) => {
       // Use keywords or default search
       const searchQuery = keywords || 'software engineer'
       try {
+        // Search for regular positions
         const adzunaJobs = await fetchFromAdzunaAPI(searchQuery, location)
         console.log(`✅ Fetched ${adzunaJobs.length} jobs from Adzuna API for "${searchQuery}"`)
         if (adzunaJobs.length > 0) {
           allJobs.push(...adzunaJobs)
-        } else {
-          console.log('⚠️ Adzuna API returned 0 jobs')
+        }
+        
+        // Also search for internships
+        const internshipQuery = `${searchQuery} internship`
+        const internshipJobs = await fetchFromAdzunaAPI(internshipQuery, location)
+        console.log(`✅ Fetched ${internshipJobs.length} internships from Adzuna API`)
+        if (internshipJobs.length > 0) {
+          allJobs.push(...internshipJobs)
         }
       } catch (err) {
         console.error('❌ Adzuna API failed:', err)
@@ -71,11 +89,21 @@ serve(async (req) => {
       console.log(`🔍 Searching The Muse for ${careerInterests.length} career interests`)
       for (const interest of careerInterests) {
         try {
+          // Search for regular positions
           const museJobs = await fetchFromTheMuseAPI(interest, location)
           console.log(`✅ Fetched ${museJobs.length} jobs from The Muse for "${interest}"`)
           if (museJobs.length > 0) {
             allJobs.push(...museJobs)
           }
+          
+          // Also search for internships
+          const internshipQuery = `${interest} internship`
+          const internshipJobs = await fetchFromTheMuseAPI(internshipQuery, location)
+          console.log(`✅ Fetched ${internshipJobs.length} internships from The Muse for "${interest}"`)
+          if (internshipJobs.length > 0) {
+            allJobs.push(...internshipJobs)
+          }
+          
           // Small delay to avoid rate limiting
           await new Promise(resolve => setTimeout(resolve, 200))
         } catch (err) {
@@ -85,43 +113,94 @@ serve(async (req) => {
     } else {
       const searchQuery = keywords || 'software engineer'
       try {
+        // Search for regular positions
         const museJobs = await fetchFromTheMuseAPI(searchQuery, location)
         console.log(`✅ Fetched ${museJobs.length} jobs from The Muse API for "${searchQuery}"`)
         if (museJobs.length > 0) {
           allJobs.push(...museJobs)
+        }
+        
+        // Also search for internships
+        const internshipQuery = `${searchQuery} internship`
+        const internshipJobs = await fetchFromTheMuseAPI(internshipQuery, location)
+        console.log(`✅ Fetched ${internshipJobs.length} internships from The Muse API`)
+        if (internshipJobs.length > 0) {
+          allJobs.push(...internshipJobs)
         }
       } catch (err) {
         console.error('❌ The Muse API failed:', err)
       }
     }
 
-    // Fetch from Apify LinkedIn Scraper (third source)
-    if (careerInterests.length > 0) {
-      console.log(`🔍 Searching LinkedIn via Apify for ${careerInterests.length} career interests`)
-      for (const interest of careerInterests) {
-        try {
-          const linkedInJobs = await fetchFromApifyLinkedIn(interest, location)
-          console.log(`✅ Fetched ${linkedInJobs.length} jobs from LinkedIn for "${interest}"`)
-          if (linkedInJobs.length > 0) {
-            allJobs.push(...linkedInJobs)
-          }
-          // Longer delay for Apify (more resource intensive)
-          await new Promise(resolve => setTimeout(resolve, 1000))
-        } catch (err) {
-          console.error(`❌ Apify LinkedIn scraper failed for "${interest}":`, err)
+    // Fetch from Web Scraping (Indeed, Monster, Glassdoor, ZipRecruiter)
+    // This is faster and more reliable than Apify
+    if (allJobs.length < 100) { // Only scrape if we need more jobs
+      console.log(`🌐 Starting web scraping from job boards...`)
+      
+      // Build search queries from career interests
+      const searchQueries: string[] = []
+      if (careerInterests.length > 0) {
+        // Search each career interest separately
+        for (const interest of careerInterests) {
+          searchQueries.push(interest)
+          // Also add internship variant
+          searchQueries.push(`${interest} internship`)
         }
+      } else {
+        searchQueries.push(keywords || 'software engineer')
+      }
+      
+      // Limit to first 2 queries to avoid timeout
+      const queriesToSearch = searchQueries.slice(0, 2)
+      
+      // Scrape from multiple job boards in parallel
+      const scrapingPromises: Promise<any[]>[] = []
+      
+      for (const query of queriesToSearch) {
+        scrapingPromises.push(
+          scrapeIndeed(query, location).catch(err => {
+            console.error(`❌ Indeed scraping failed for "${query}":`, err)
+            return []
+          }),
+          scrapeMonster(query, location).catch(err => {
+            console.error(`❌ Monster scraping failed for "${query}":`, err)
+            return []
+          }),
+          scrapeGlassdoor(query, location).catch(err => {
+            console.error(`❌ Glassdoor scraping failed for "${query}":`, err)
+            return []
+          }),
+          scrapeZipRecruiter(query, location).catch(err => {
+            console.error(`❌ ZipRecruiter scraping failed for "${query}":`, err)
+            return []
+          })
+        )
+        
+        // Small delay between queries to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+      
+      // Wait for all scraping to complete (with timeout)
+      try {
+        const scrapingResults = await Promise.race([
+          Promise.all(scrapingPromises),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Scraping timeout')), 20000) // 20 second timeout
+          )
+        ]) as any[][]
+        
+        for (const jobs of scrapingResults) {
+          if (jobs && jobs.length > 0) {
+            allJobs.push(...jobs)
+            console.log(`✅ Added ${jobs.length} jobs from web scraping`)
+          }
+        }
+      } catch (timeoutErr) {
+        console.log(`⏱️ Web scraping timed out (this is normal - continuing with existing jobs)`)
+        // Continue with jobs we already have
       }
     } else {
-      const searchQuery = keywords || 'software engineer'
-      try {
-        const linkedInJobs = await fetchFromApifyLinkedIn(searchQuery, location)
-        console.log(`✅ Fetched ${linkedInJobs.length} jobs from LinkedIn for "${searchQuery}"`)
-        if (linkedInJobs.length > 0) {
-          allJobs.push(...linkedInJobs)
-        }
-      } catch (err) {
-        console.error('❌ Apify LinkedIn scraper failed:', err)
-      }
+      console.log('ℹ️ Skipping web scraping (already have enough jobs)')
     }
 
     // Only return sample data if Adzuna completely failed AND we have no jobs
@@ -322,111 +401,272 @@ function mapKeywordsToCategory(keywords: string): string | null {
   return null // No specific category match
 }
 
-// Fetch jobs from Apify LinkedIn Scraper
-async function fetchFromApifyLinkedIn(keywords: string, location: string): Promise<any[]> {
-  // Get API token from environment variables
-  const APIFY_TOKEN = Deno.env.get('APIFY_TOKEN')
-  
-  if (!APIFY_TOKEN) {
-    console.error('❌ APIFY_TOKEN not set in environment variables')
-    return []
-  }
-  const ACTOR_ID = 'worldunboxer~rapid-linkedin-scraper'
+// Web Scraping Functions for Job Boards
+// Using Cheerio for fast HTML parsing
+
+// Scrape Indeed
+async function scrapeIndeed(keywords: string, location: string): Promise<any[]> {
+  const jobs: any[] = []
   
   try {
-    console.log(`🔍 Starting Apify LinkedIn scraper for: "${keywords}"${location ? ` in ${location}` : ''}`)
+    const searchUrl = `https://www.indeed.com/jobs?q=${encodeURIComponent(keywords)}&l=${encodeURIComponent(location || '')}`
     
-    // Step 1: Start the actor run
-    const runUrl = `https://api.apify.com/v2/acts/${ACTOR_ID}/runs?token=${APIFY_TOKEN}`
-    const runResponse = await fetch(runUrl, {
-      method: 'POST',
+    const response = await fetch(searchUrl, {
       headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        job_title: keywords,
-        job_type: 'F', // F for full-time, P for part-time
-        jobs_entries: 25, // Number of jobs to fetch
-        location: location || '',
-        start_jobs: 0
-      })
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+      }
     })
 
-    if (!runResponse.ok) {
-      const errorText = await runResponse.text()
-      throw new Error(`Apify run failed: ${runResponse.status} - ${errorText}`)
+    if (!response.ok) {
+      console.error(`❌ Indeed request failed: ${response.status}`)
+      return jobs
     }
 
-    const runData = await runResponse.json()
-    const runId = runData.data.id
-    
-    console.log(`⏳ Apify run started: ${runId}, waiting for completion...`)
+    const html = await response.text()
+    const $ = load(html)
 
-    // Step 2: Wait for the run to complete (with timeout)
-    const maxWaitTime = 60000 // 60 seconds
-    const startTime = Date.now()
-    let runStatus = 'RUNNING'
-    
-    while (runStatus === 'RUNNING' && (Date.now() - startTime) < maxWaitTime) {
-      await new Promise(resolve => setTimeout(resolve, 2000)) // Check every 2 seconds
-      
-      const statusUrl = `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_TOKEN}`
-      const statusResponse = await fetch(statusUrl)
-      
-      if (statusResponse.ok) {
-        const statusData = await statusResponse.json()
-        runStatus = statusData.data.status
+    // Indeed job listings are in cards with class 'job_seen_beacon' or 'slider_container'
+    $('.job_seen_beacon, .slider_container').each((i: number, element: any) => {
+      try {
+        const $el = $(element)
         
-        if (runStatus === 'SUCCEEDED') {
-          break
-        } else if (runStatus === 'FAILED' || runStatus === 'ABORTED') {
-          throw new Error(`Apify run ${runStatus.toLowerCase()}`)
+        // Extract job title
+        const titleLink = $el.find('h2.jobTitle a, .jobTitle a, a[data-jk]').first()
+        const title = titleLink.text().trim() || $el.find('h2.jobTitle').text().trim()
+        
+        // Extract company
+        const company = $el.find('.companyName, [data-testid="company-name"]').text().trim()
+        
+        // Extract location
+        const jobLocation = $el.find('.companyLocation, [data-testid="text-location"]').text().trim()
+        
+        // Extract salary
+        const salary = $el.find('.salary-snippet-container, .attribute_snippet').text().trim() || null
+        
+        // Extract job URL
+        let jobUrl = titleLink.attr('href')
+        if (jobUrl && !jobUrl.startsWith('http')) {
+          jobUrl = `https://www.indeed.com${jobUrl}`
         }
+        
+        // Extract description/snippet
+        const description = $el.find('.job-snippet, .summary').text().trim()
+
+        if (title && company) {
+          jobs.push({
+            id: `indeed_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            title: title,
+            company: company,
+            location: jobLocation || location || 'Location not specified',
+            posted_date: new Date().toISOString().split('T')[0],
+            description: description || null,
+            url: jobUrl || null,
+            salary: salary,
+            job_type: null,
+          })
+        }
+      } catch (err) {
+        // Skip individual job parsing errors
       }
-    }
+    })
 
-    if (runStatus !== 'SUCCEEDED') {
-      throw new Error('Apify run timed out or failed')
-    }
-
-    console.log(`✅ Apify run completed, fetching dataset...`)
-
-    // Step 3: Get the dataset
-    const datasetUrl = `https://api.apify.com/v2/datasets/${runData.data.defaultDatasetId}/items?token=${APIFY_TOKEN}`
-    const datasetResponse = await fetch(datasetUrl)
-
-    if (!datasetResponse.ok) {
-      throw new Error(`Failed to fetch dataset: ${datasetResponse.status}`)
-    }
-
-    const datasetData = await datasetResponse.json()
-    
-    if (!datasetData || datasetData.length === 0) {
-      console.log('⚠️ No results from Apify LinkedIn scraper')
-      return []
-    }
-
-    console.log(`📊 Apify returned ${datasetData.length} jobs`)
-
-    // Step 4: Transform Apify LinkedIn jobs to our JobPost format
-    const transformedJobs = datasetData.map((job: any) => ({
-      id: `linkedin_apify_${job.job_id || job.id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      title: job.job_title || job.title || 'Job Title',
-      company: job.company_name || job.company || 'Company not specified',
-      location: job.location || location || 'Location not specified',
-      posted_date: job.posted_date ? new Date(job.posted_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      description: job.job_description || job.description || null,
-      url: job.apply_url || job.job_url || job.url || null,
-      salary: job.salary_range || job.salary || null,
-      job_type: job.employment_type || job.job_type || null,
-    }))
-
-    console.log(`✅ Transformed ${transformedJobs.length} jobs from Apify LinkedIn`)
-    return transformedJobs
+    console.log(`✅ Scraped ${jobs.length} jobs from Indeed`)
   } catch (error) {
-    console.error('❌ Apify LinkedIn scraper error:', error)
-    return [] // Return empty array instead of throwing
+    console.error('❌ Indeed scraping error:', error)
   }
+
+  return jobs
+}
+
+// Scrape Monster
+async function scrapeMonster(keywords: string, location: string): Promise<any[]> {
+  const jobs: any[] = []
+  
+  try {
+    const searchUrl = `https://www.monster.com/jobs/search/?q=${encodeURIComponent(keywords)}&where=${encodeURIComponent(location || '')}`
+    
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      }
+    })
+
+    if (!response.ok) {
+      console.error(`❌ Monster request failed: ${response.status}`)
+      return jobs
+    }
+
+    const html = await response.text()
+    const $ = load(html)
+
+    // Monster job listings structure
+    $('[data-testid="organic-job"], .card-content, .summary').each((i: number, element: any) => {
+      try {
+        const $el = $(element)
+        
+        const title = $el.find('h2 a, h3 a, .title a').text().trim()
+        const company = $el.find('.company, [data-testid="company-name"]').text().trim()
+        const jobLocation = $el.find('.location, [data-testid="job-location"]').text().trim()
+        const description = $el.find('.summary, .description').text().trim()
+        
+        let jobUrl = $el.find('h2 a, h3 a, .title a').attr('href')
+        if (jobUrl && !jobUrl.startsWith('http')) {
+          jobUrl = `https://www.monster.com${jobUrl}`
+        }
+
+        if (title && company) {
+          jobs.push({
+            id: `monster_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            title: title,
+            company: company,
+            location: jobLocation || location || 'Location not specified',
+            posted_date: new Date().toISOString().split('T')[0],
+            description: description || null,
+            url: jobUrl || null,
+            salary: null,
+            job_type: null,
+          })
+        }
+      } catch (err) {
+        // Skip individual job parsing errors
+      }
+    })
+
+    console.log(`✅ Scraped ${jobs.length} jobs from Monster`)
+  } catch (error) {
+    console.error('❌ Monster scraping error:', error)
+  }
+
+  return jobs
+}
+
+// Scrape Glassdoor
+async function scrapeGlassdoor(keywords: string, location: string): Promise<any[]> {
+  const jobs: any[] = []
+  
+  try {
+    const searchUrl = `https://www.glassdoor.com/Job/jobs.htm?sc.keyword=${encodeURIComponent(keywords)}&locT=C&locId=${encodeURIComponent(location || '')}`
+    
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      }
+    })
+
+    if (!response.ok) {
+      console.error(`❌ Glassdoor request failed: ${response.status}`)
+      return jobs
+    }
+
+    const html = await response.text()
+    const $ = load(html)
+
+    // Glassdoor job listings
+    $('[data-test="job-listing"], .jobContainer, .react-job-listing').each((i: number, element: any) => {
+      try {
+        const $el = $(element)
+        
+        const title = $el.find('[data-test="job-title"], .jobTitle a').text().trim()
+        const company = $el.find('[data-test="employer-name"], .employerName').text().trim()
+        const jobLocation = $el.find('[data-test="job-location"], .location').text().trim()
+        const description = $el.find('.jobDescriptionContent, .jobDescription').text().trim()
+        
+        let jobUrl = $el.find('[data-test="job-title"] a, .jobTitle a').attr('href')
+        if (jobUrl && !jobUrl.startsWith('http')) {
+          jobUrl = `https://www.glassdoor.com${jobUrl}`
+        }
+
+        if (title && company) {
+          jobs.push({
+            id: `glassdoor_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            title: title,
+            company: company,
+            location: jobLocation || location || 'Location not specified',
+            posted_date: new Date().toISOString().split('T')[0],
+            description: description || null,
+            url: jobUrl || null,
+            salary: null,
+            job_type: null,
+          })
+        }
+      } catch (err) {
+        // Skip individual job parsing errors
+      }
+    })
+
+    console.log(`✅ Scraped ${jobs.length} jobs from Glassdoor`)
+  } catch (error) {
+    console.error('❌ Glassdoor scraping error:', error)
+  }
+
+  return jobs
+}
+
+// Scrape ZipRecruiter
+async function scrapeZipRecruiter(keywords: string, location: string): Promise<any[]> {
+  const jobs: any[] = []
+  
+  try {
+    const searchUrl = `https://www.ziprecruiter.com/jobs-search?search=${encodeURIComponent(keywords)}&location=${encodeURIComponent(location || '')}`
+    
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      }
+    })
+
+    if (!response.ok) {
+      console.error(`❌ ZipRecruiter request failed: ${response.status}`)
+      return jobs
+    }
+
+    const html = await response.text()
+    const $ = load(html)
+
+    // ZipRecruiter job listings
+    $('.job_content, .job_result, [data-testid="job-card"]').each((i: number, element: any) => {
+      try {
+        const $el = $(element)
+        
+        const title = $el.find('h2 a, .job_title a, [data-testid="job-title"]').text().trim()
+        const company = $el.find('.company_name, [data-testid="company-name"]').text().trim()
+        const jobLocation = $el.find('.job_location, [data-testid="job-location"]').text().trim()
+        const description = $el.find('.job_snippet, .job_description').text().trim()
+        
+        let jobUrl = $el.find('h2 a, .job_title a').attr('href')
+        if (jobUrl && !jobUrl.startsWith('http')) {
+          jobUrl = `https://www.ziprecruiter.com${jobUrl}`
+        }
+
+        if (title && company) {
+          jobs.push({
+            id: `ziprecruiter_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            title: title,
+            company: company,
+            location: jobLocation || location || 'Location not specified',
+            posted_date: new Date().toISOString().split('T')[0],
+            description: description || null,
+            url: jobUrl || null,
+            salary: null,
+            job_type: null,
+          })
+        }
+      } catch (err) {
+        // Skip individual job parsing errors
+      }
+    })
+
+    console.log(`✅ Scraped ${jobs.length} jobs from ZipRecruiter`)
+  } catch (error) {
+    console.error('❌ ZipRecruiter scraping error:', error)
+  }
+
+  return jobs
 }
 
 // Format salary from Adzuna API

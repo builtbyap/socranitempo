@@ -16,7 +16,19 @@ struct FeedView: View {
     @State private var error: String?
     @State private var careerInterests: [String] = []
     @State private var showingSimpleApply: JobPost?
+    @State private var showingAutoApply: JobPost?
     @State private var applicationData: ApplicationData?
+    @State private var filters = JobFilters()
+    @State private var showingFilters = false
+    @State private var allJobPosts: [JobPost] = [] // Store all jobs before filtering
+    
+    // Computed property for filtered jobs
+    private var filteredJobPosts: [JobPost] {
+        if filters.hasActiveFilters {
+            return filters.apply(to: allJobPosts)
+        }
+        return allJobPosts
+    }
     
     var body: some View {
         NavigationView {
@@ -70,17 +82,25 @@ struct FeedView: View {
                                     }
                                     .padding(.top, 100)
                                 } else {
-                                    ForEach(jobPosts) { post in
+                                    ForEach(filteredJobPosts) { post in
                                         JobPostCard(
                                             post: post,
                                             isSaved: false,
                                             onToggleSave: {},
                                             onSimpleApply: {
-                                                // Get profile data and show review
+                                                // Get profile data
                                                 let profileData = SimpleApplyService.shared.getUserProfileData()
                                                 let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
                                                 applicationData = appData
-                                                showingSimpleApply = post
+                                                
+                                                // Check if job has URL for auto-apply
+                                                if let jobURL = post.url, !jobURL.isEmpty {
+                                                    // Directly start AI Auto-Apply (like sorce.jobs)
+                                                    showingAutoApply = post
+                                                } else {
+                                                    // No URL, show review screen instead
+                                                    showingSimpleApply = post
+                                                }
                                             }
                                         )
                                     }
@@ -133,6 +153,30 @@ struct FeedView: View {
                 }
             }
             .navigationTitle("Feed")
+            .toolbar {
+                if selectedTab == 0 {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button(action: {
+                            showingFilters = true
+                        }) {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "line.3.horizontal.decrease.circle")
+                                    .font(.system(size: 20))
+                                
+                                if filters.hasActiveFilters {
+                                    Circle()
+                                        .fill(Color.red)
+                                        .frame(width: 8, height: 8)
+                                        .offset(x: 4, y: -4)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showingFilters) {
+                JobFiltersView(filters: $filters)
+            }
             .onAppear {
                 loadCareerInterests()
                 Task {
@@ -149,6 +193,14 @@ struct FeedView: View {
             )) {
                 if let job = showingSimpleApply, let appData = applicationData {
                     SimpleApplyReviewView(job: job, applicationData: appData)
+                }
+            }
+            .fullScreenCover(item: Binding(
+                get: { showingAutoApply },
+                set: { showingAutoApply = $0 }
+            )) { job in
+                if let appData = applicationData {
+                    AutoApplyView(job: job, applicationData: appData)
                 }
             }
         }
@@ -214,8 +266,15 @@ struct FeedView: View {
                         post1.postedDate > post2.postedDate
                     }
                     
-                    self.jobPosts = uniquePosts
+                    self.allJobPosts = uniquePosts
+                    self.jobPosts = uniquePosts // Keep for compatibility
                     self.loading = false
+                    
+                    // Queue jobs for auto-apply (like sorce.jobs)
+                    // This will automatically apply to company career pages
+                    Task {
+                        AutoApplyQueueService.shared.queueJobsForAutoApply(uniquePosts)
+                    }
                 }
             case 1:
                 // Fetch LinkedIn Profiles

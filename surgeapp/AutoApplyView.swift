@@ -7,6 +7,7 @@
 
 import SwiftUI
 import WebKit
+import Combine
 
 struct AutoApplyView: View {
     let job: JobPost
@@ -282,7 +283,6 @@ struct AutoApplyView: View {
             await detectAndHandleQuestions()
             
             // Wait for forms to fill and check progress
-            var allFieldsFilled = false
             for attempt in 0..<8 { // Check up to 8 times (8 seconds max)
                 try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
                 
@@ -297,13 +297,11 @@ struct AutoApplyView: View {
                 
                 // If most fields filled (80% or more), proceed to submit
                 if totalFields > 0 && filledFieldsCount >= Int(Double(totalFields) * 0.8) {
-                    allFieldsFilled = true
                     break
                 }
                 
                 // If we've filled at least some fields and waited enough, proceed
                 if attempt >= 5 && filledFieldsCount > 0 {
-                    allFieldsFilled = true
                     break
                 }
             }

@@ -210,7 +210,7 @@ struct ApplicationCard: View {
         Task {
             do {
                 try await SupabaseService.shared.updateApplicationStatus(
-                    applicationId: application.id,
+                    application.id,
                     status: newStatus
                 )
                 await MainActor.run {

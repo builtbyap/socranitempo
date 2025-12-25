@@ -35,12 +35,12 @@ struct SimpleApplyReviewView: View {
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(.secondary)
                         
-                        if let location = job.location, !location.isEmpty {
+                        if !job.location.isEmpty {
                             HStack(spacing: 6) {
                                 Image(systemName: "location.fill")
                                     .font(.system(size: 12))
                                     .foregroundColor(.secondary)
-                                Text(location)
+                                Text(job.location)
                                     .font(.system(size: 14))
                                     .foregroundColor(.secondary)
                             }
