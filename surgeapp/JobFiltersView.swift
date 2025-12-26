@@ -10,133 +10,584 @@ import SwiftUI
 struct JobFiltersView: View {
     @Binding var filters: JobFilters
     @Environment(\.dismiss) var dismiss
+    @State private var selectedJobTitles: Set<String> = []
+    @State private var selectedLocations: Set<String> = []
+    @State private var showingJobTitlePicker = false
+    @State private var showingLocationPicker = false
+    
+    // Load career interests and user location on appear
+    private func loadDefaults() {
+        // Load career interests as job titles
+        if let data = UserDefaults.standard.data(forKey: "savedCareerArchetypes"),
+           let careerInterests = try? JSONDecoder().decode([String].self, from: data) {
+            selectedJobTitles = Set(careerInterests)
+            filters.jobTitles = Set(careerInterests)
+        }
+        
+        // Load user's location as default location
+        if let userLocation = UserDefaults.standard.string(forKey: "profile_location"),
+           !userLocation.isEmpty {
+            selectedLocations.insert(userLocation)
+            filters.locations.insert(userLocation)
+            filters.location = userLocation
+        }
+    }
     
     var body: some View {
         NavigationStack {
-            Form {
-                // Job Type Section
-                Section(header: Text("Job Type")) {
-                    ForEach(JobType.allCases, id: \.self) { type in
-                        Toggle(type.rawValue, isOn: Binding(
-                            get: { filters.jobTypes.contains(type) },
-                            set: { isOn in
-                                if isOn {
-                                    filters.jobTypes.insert(type)
-                                } else {
-                                    filters.jobTypes.remove(type)
-                                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Job Titles Section
+                    FilterSection(
+                        title: "Job Titles",
+                        count: selectedJobTitles.count,
+                        showInfo: true
+                    ) {
+                        if selectedJobTitles.isEmpty {
+                            Button(action: {
+                                showingJobTitlePicker = true
+                            }) {
+                                Text("Add Job Titles")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(8)
                             }
-                        ))
-                    }
-                }
-                
-                // Location Type Section
-                Section(header: Text("Location")) {
-                    ForEach(LocationType.allCases, id: \.self) { location in
-                        Toggle(location.rawValue, isOn: Binding(
-                            get: { filters.locationTypes.contains(location) },
-                            set: { isOn in
-                                if isOn {
-                                    filters.locationTypes.insert(location)
-                                } else {
-                                    filters.locationTypes.remove(location)
+                        } else {
+                            VStack(alignment: .leading, spacing: 8) {
+                                // Show first 2 titles, then "+ X more"
+                                let titlesArray = Array(selectedJobTitles)
+                                ForEach(Array(titlesArray.prefix(2)), id: \.self) { title in
+                                    HStack {
+                                        Text(title)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        Button(action: {
+                                            selectedJobTitles.remove(title)
+                                            filters.jobTitles.remove(title)
+                                        }) {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .foregroundColor(.secondary)
+                                                .font(.system(size: 16))
+                                        }
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(8)
                                 }
+                                
+                                if selectedJobTitles.count > 2 {
+                                    Text("+ \(selectedJobTitles.count - 2) more")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.secondary)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(Color(.systemGray6))
+                                        .cornerRadius(8)
+                                }
+                                
+                                Button(action: {
+                                    showingJobTitlePicker = true
+                                }) {
+                                    Text("+ Add More")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.blue)
+                                }
+                                .padding(.top, 4)
                             }
-                        ))
+                        }
                     }
                     
-                    TextField("City, State, or Zip Code", text: $filters.location)
-                        .textFieldStyle(.roundedBorder)
-                }
-                
-                // Salary Range Section
-                Section(header: Text("Salary Range")) {
-                    Picker("Minimum Salary", selection: $filters.minSalary) {
-                        Text("Any").tag(nil as Int?)
-                        Text("$50,000+").tag(50000 as Int?)
-                        Text("$75,000+").tag(75000 as Int?)
-                        Text("$100,000+").tag(100000 as Int?)
-                        Text("$125,000+").tag(125000 as Int?)
-                        Text("$150,000+").tag(150000 as Int?)
-                        Text("$200,000+").tag(200000 as Int?)
+                    // Locations Section
+                    FilterSection(
+                        title: "Locations",
+                        count: selectedLocations.count,
+                        showInfo: true
+                    ) {
+                        if selectedLocations.isEmpty {
+                            Button(action: {
+                                showingLocationPicker = true
+                            }) {
+                                Text("Add Location")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(8)
+                            }
+                        } else {
+                            ForEach(Array(selectedLocations), id: \.self) { location in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(location)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.primary)
+                                        Text("50m")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    Spacer()
+                                    Button(action: {
+                                        selectedLocations.remove(location)
+                                        filters.locations.remove(location)
+                                        if filters.location == location {
+                                            filters.location = selectedLocations.first ?? ""
+                                        }
+                                    }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(.secondary)
+                                            .font(.system(size: 16))
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color(.systemGray6))
+                                .cornerRadius(8)
+                            }
+                            
+                            Button(action: {
+                                showingLocationPicker = true
+                            }) {
+                                Text("+ Add More")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.blue)
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                     
-                    Picker("Maximum Salary", selection: $filters.maxSalary) {
-                        Text("Any").tag(nil as Int?)
-                        Text("Up to $75,000").tag(75000 as Int?)
-                        Text("Up to $100,000").tag(100000 as Int?)
-                        Text("Up to $125,000").tag(125000 as Int?)
-                        Text("Up to $150,000").tag(150000 as Int?)
-                        Text("Up to $200,000").tag(200000 as Int?)
-                        Text("Up to $250,000").tag(250000 as Int?)
-                        Text("Up to $300,000").tag(300000 as Int?)
+                    // Premium Filters Section
+                    FilterSection(
+                        title: "Premium Filters",
+                        count: nil,
+                        showInfo: false,
+                        titleColor: .green
+                    ) {
+                        PillButton(
+                            text: "New",
+                            isSelected: false,
+                            color: .blue
+                        ) {
+                            // Premium filter action
+                        }
                     }
-                }
-                
-                // Experience Level Section
-                Section(header: Text("Experience Level")) {
-                    ForEach(ExperienceLevel.allCases, id: \.self) { level in
-                        Toggle(level.rawValue, isOn: Binding(
-                            get: { filters.experienceLevels.contains(level) },
-                            set: { isOn in
-                                if isOn {
-                                    filters.experienceLevels.insert(level)
+                    
+                    // Remote Options Section
+                    FilterSection(
+                        title: "Remote Options",
+                        count: nil,
+                        showInfo: false
+                    ) {
+                        HStack(spacing: 8) {
+                            PillButton(
+                                text: "Remote",
+                                isSelected: filters.locationTypes.contains(.remote),
+                                color: .blue
+                            ) {
+                                if filters.locationTypes.contains(.remote) {
+                                    filters.locationTypes.remove(.remote)
                                 } else {
-                                    filters.experienceLevels.remove(level)
+                                    filters.locationTypes.insert(.remote)
                                 }
                             }
-                        ))
-                    }
-                }
-                
-                // Date Posted Section
-                Section(header: Text("Date Posted")) {
-                    Picker("Posted Within", selection: $filters.datePosted) {
-                        Text("Any Time").tag(nil as DatePostedFilter?)
-                        Text("Last 24 Hours").tag(DatePostedFilter.last24Hours)
-                        Text("Last Week").tag(DatePostedFilter.lastWeek)
-                        Text("Last Month").tag(DatePostedFilter.lastMonth)
-                        Text("Last 3 Months").tag(DatePostedFilter.last3Months)
-                    }
-                }
-                
-                // Company Size Section
-                Section(header: Text("Company Size")) {
-                    ForEach(CompanySize.allCases, id: \.self) { size in
-                        Toggle(size.rawValue, isOn: Binding(
-                            get: { filters.companySizes.contains(size) },
-                            set: { isOn in
-                                if isOn {
-                                    filters.companySizes.insert(size)
+                            
+                            PillButton(
+                                text: "Hybrid",
+                                isSelected: filters.locationTypes.contains(.hybrid),
+                                color: .blue
+                            ) {
+                                if filters.locationTypes.contains(.hybrid) {
+                                    filters.locationTypes.remove(.hybrid)
                                 } else {
-                                    filters.companySizes.remove(size)
+                                    filters.locationTypes.insert(.hybrid)
                                 }
                             }
-                        ))
+                            
+                            PillButton(
+                                text: "In Person",
+                                isSelected: filters.locationTypes.contains(.onSite),
+                                color: .blue
+                            ) {
+                                if filters.locationTypes.contains(.onSite) {
+                                    filters.locationTypes.remove(.onSite)
+                                } else {
+                                    filters.locationTypes.insert(.onSite)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Job Types Section
+                    FilterSection(
+                        title: "Job Types",
+                        count: nil,
+                        showInfo: false
+                    ) {
+                        FlowLayout(spacing: 8) {
+                            ForEach(JobType.allCases, id: \.self) { type in
+                                PillButton(
+                                    text: type.rawValue,
+                                    isSelected: filters.jobTypes.contains(type),
+                                    color: .blue
+                                ) {
+                                    if filters.jobTypes.contains(type) {
+                                        filters.jobTypes.remove(type)
+                                    } else {
+                                        filters.jobTypes.insert(type)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Job Levels Section
+                    FilterSection(
+                        title: "Job Levels",
+                        count: nil,
+                        showInfo: false
+                    ) {
+                        FlowLayout(spacing: 8) {
+                            ForEach(ExperienceLevel.allCases, id: \.self) { level in
+                                PillButton(
+                                    text: level.rawValue,
+                                    isSelected: filters.experienceLevels.contains(level),
+                                    color: .gray
+                                ) {
+                                    if filters.experienceLevels.contains(level) {
+                                        filters.experienceLevels.remove(level)
+                                    } else {
+                                        filters.experienceLevels.insert(level)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Job Requirements Section
+                    FilterSection(
+                        title: "Job Requirements",
+                        count: nil,
+                        showInfo: false
+                    ) {
+                        PillButton(
+                            text: "Sponsors H1B",
+                            isSelected: false,
+                            color: .gray
+                        ) {
+                            // Job requirement action
+                        }
                     }
                 }
-                
-                // Reset Button
-                Section {
-                    Button("Reset All Filters") {
-                        filters = JobFilters()
-                    }
-                    .foregroundColor(.red)
-                }
+                .padding()
             }
-            .navigationTitle("Filters")
+            .navigationTitle("Edit Job Preferences")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
+                    Button(action: {
                         dismiss()
+                    }) {
+                        Image(systemName: "xmark")
+                            .foregroundColor(.primary)
                     }
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Apply") {
+                    HStack(spacing: 16) {
+                        if filters.hasActiveFilters {
+                            Button("Clear") {
+                                filters = JobFilters()
+                                selectedJobTitles.removeAll()
+                                selectedLocations.removeAll()
+                                // Reload defaults after clearing
+                                loadDefaults()
+                            }
+                            .foregroundColor(.primary)
+                        }
+                        
+                        Button("Apply") {
+                            // Sync all state to filters before dismissing
+                            filters.jobTitles = selectedJobTitles
+                            filters.locations = selectedLocations
+                            if let firstLocation = selectedLocations.first {
+                                filters.location = firstLocation
+                            }
+                            dismiss()
+                        }
+                        .fontWeight(.semibold)
+                        .foregroundColor(.blue)
+                    }
+                }
+            }
+            .sheet(isPresented: $showingJobTitlePicker) {
+                JobTitlePickerView(selectedTitles: $selectedJobTitles, filters: $filters)
+            }
+            .sheet(isPresented: $showingLocationPicker) {
+                LocationPickerView(selectedLocations: $selectedLocations, filters: $filters)
+            }
+            .onAppear {
+                loadDefaults()
+            }
+        }
+    }
+}
+
+// MARK: - Filter Section Header
+struct FilterSection<Content: View>: View {
+    let title: String
+    let count: Int?
+    let showInfo: Bool
+    var titleColor: Color = .primary
+    @ViewBuilder let content: Content
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(titleColor)
+                
+                if let count = count {
+                    Text("(\(count))")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.primary)
+                }
+                
+                if showInfo {
+                    Button(action: {
+                        // Show info
+                    }) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Spacer()
+            }
+            
+            content
+        }
+    }
+}
+
+// MARK: - Pill Button
+struct PillButton: View {
+    let text: String
+    let isSelected: Bool
+    let color: Color
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(text)
+                .font(.system(size: 14))
+                .foregroundColor(.primary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(isSelected ? Color(.systemGray5) : Color(.systemGray6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 1.5)
+                        )
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+// MARK: - Job Title Picker View
+struct JobTitlePickerView: View {
+    @Binding var selectedTitles: Set<String>
+    @Binding var filters: JobFilters
+    @Environment(\.dismiss) var dismiss
+    @State private var searchText = ""
+    
+    // Load career interests as default options, plus common job titles
+    private var availableTitles: [String] {
+        var titles: [String] = []
+        
+        // First, add career interests from UserDefaults
+        if let data = UserDefaults.standard.data(forKey: "savedCareerArchetypes"),
+           let careerInterests = try? JSONDecoder().decode([String].self, from: data) {
+            titles.append(contentsOf: careerInterests)
+        }
+        
+        // Add common job titles (excluding ones already in career interests)
+        let commonTitles = [
+            "Software Engineer", "Data Analyst", "Product Manager", "Marketing Associate",
+            "Finance Analyst", "Mechanical Engineer", "Mechatronics Engineer", "Mechanical Engineering",
+            "UX Designer", "Product Designer", "Sales Manager", "Business Analyst",
+            "Software Developer", "Full Stack Developer", "Frontend Developer", "Backend Developer",
+            "Data Scientist", "Machine Learning Engineer", "DevOps Engineer", "QA Engineer"
+        ]
+        
+        for title in commonTitles {
+            if !titles.contains(title) {
+                titles.append(title)
+            }
+        }
+        
+        return titles
+    }
+    
+    var filteredTitles: [String] {
+        if searchText.isEmpty {
+            return availableTitles
+        }
+        return availableTitles.filter { $0.lowercased().contains(searchText.lowercased()) }
+    }
+    
+    var body: some View {
+        NavigationStack {
+            VStack {
+                TextField("Search job titles", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .padding()
+                
+                List {
+                    ForEach(filteredTitles, id: \.self) { title in
+                        HStack {
+                            Text(title)
+                            Spacer()
+                            if selectedTitles.contains(title) {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if selectedTitles.contains(title) {
+                                selectedTitles.remove(title)
+                                filters.jobTitles.remove(title)
+                            } else {
+                                selectedTitles.insert(title)
+                                filters.jobTitles.insert(title)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Job Titles")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
                         dismiss()
                     }
-                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Location Picker View
+struct LocationPickerView: View {
+    @Binding var selectedLocations: Set<String>
+    @Binding var filters: JobFilters
+    @Environment(\.dismiss) var dismiss
+    @State private var searchText = ""
+    @State private var radius: Int = 50
+    
+    // Get available locations - user's location first, then common locations
+    private var availableLocations: [String] {
+        var locations: [String] = []
+        
+        // Add user's location first if available
+        if let userLocation = UserDefaults.standard.string(forKey: "profile_location"),
+           !userLocation.isEmpty {
+            locations.append(userLocation)
+        }
+        
+        // Add common locations (excluding user's location if already added)
+        let commonLocations = [
+            "San Francisco, California, United States",
+            "New York, New York, United States",
+            "Austin, Texas, United States",
+            "Seattle, Washington, United States",
+            "Boston, Massachusetts, United States",
+            "Chicago, Illinois, United States",
+            "Los Angeles, California, United States",
+            "Duluth, Georgia, United States"
+        ]
+        
+        for location in commonLocations {
+            if !locations.contains(location) {
+                locations.append(location)
+            }
+        }
+        
+        return locations
+    }
+    
+    var filteredLocations: [String] {
+        if searchText.isEmpty {
+            return availableLocations
+        }
+        return availableLocations.filter { $0.lowercased().contains(searchText.lowercased()) }
+    }
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                TextField("Search locations", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .padding()
+                
+                HStack {
+                    Text("Radius: \(radius) miles")
+                    Slider(value: Binding(
+                        get: { Double(radius) },
+                        set: { radius = Int($0) }
+                    ), in: 10...100, step: 10)
+                }
+                .padding(.horizontal)
+                
+                List {
+                    ForEach(filteredLocations, id: \.self) { location in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(location)
+                                Text("\(radius)m")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            if selectedLocations.contains(location) {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if selectedLocations.contains(location) {
+                                selectedLocations.remove(location)
+                                filters.locations.remove(location)
+                            } else {
+                                selectedLocations.insert(location)
+                                filters.locations.insert(location)
+                                // Update filters.location to the first selected location
+                                if filters.location.isEmpty {
+                                    filters.location = location
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select Locations")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
                 }
             }
         }
@@ -145,9 +596,11 @@ struct JobFiltersView: View {
 
 // MARK: - Job Filters Model
 struct JobFilters {
+    var jobTitles: Set<String> = [] // Career interests / job titles
     var jobTypes: Set<JobType> = []
     var locationTypes: Set<LocationType> = []
-    var location: String = ""
+    var locations: Set<String> = [] // Selected locations
+    var location: String = "" // Primary location for filtering
     var minSalary: Int? = nil
     var maxSalary: Int? = nil
     var experienceLevels: Set<ExperienceLevel> = []
@@ -155,8 +608,10 @@ struct JobFilters {
     var companySizes: Set<CompanySize> = []
     
     var hasActiveFilters: Bool {
+        !jobTitles.isEmpty ||
         !jobTypes.isEmpty ||
         !locationTypes.isEmpty ||
+        !locations.isEmpty ||
         !location.isEmpty ||
         minSalary != nil ||
         maxSalary != nil ||
@@ -167,6 +622,18 @@ struct JobFilters {
     
     func apply(to jobs: [JobPost]) -> [JobPost] {
         var filtered = jobs
+        
+        // Filter by job titles (career interests)
+        if !jobTitles.isEmpty {
+            filtered = filtered.filter { job in
+                let jobText = "\(job.title) \(job.description ?? "")".lowercased()
+                return jobTitles.contains { title in
+                    let titleLower = title.lowercased()
+                    return jobText.contains(titleLower) || 
+                           job.title.lowercased().contains(titleLower)
+                }
+            }
+        }
         
         // Filter by job type
         if !jobTypes.isEmpty {
@@ -205,8 +672,16 @@ struct JobFilters {
             }
         }
         
-        // Filter by specific location
-        if !location.isEmpty {
+        // Filter by specific locations
+        if !locations.isEmpty {
+            filtered = filtered.filter { job in
+                return locations.contains { selectedLocation in
+                    job.location.lowercased().contains(selectedLocation.lowercased()) ||
+                    selectedLocation.lowercased().contains(job.location.lowercased())
+                }
+            }
+        } else if !location.isEmpty {
+            // Fallback to single location filter
             filtered = filtered.filter { job in
                 job.location.lowercased().contains(location.lowercased())
             }
@@ -316,8 +791,8 @@ struct JobFilters {
 
 // MARK: - Filter Enums
 enum JobType: String, CaseIterable {
-    case fullTime = "Full-time"
-    case partTime = "Part-time"
+    case fullTime = "Full Time"
+    case partTime = "Part Time"
     case contract = "Contract"
     case internship = "Internship"
     case temporary = "Temporary"
@@ -349,4 +824,3 @@ enum CompanySize: String, CaseIterable {
     case medium = "Medium (201-1000)"
     case large = "Large (1000+)"
 }
-

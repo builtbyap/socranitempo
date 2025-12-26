@@ -141,7 +141,7 @@ struct PDFViewWrapper: UIViewRepresentable {
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
         pdfView.displayDirection = .vertical
-        pdfView.document = document
+            pdfView.document = document
         return pdfView
     }
     

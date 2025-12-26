@@ -113,7 +113,7 @@ class ResumeParserService {
         // For .doc files, we'd need a library, but for now we'll try to read as text
         if url.pathExtension.lowercased() == "docx" {
             // .docx is a ZIP file containing XML
-            // Extract text between XML tags (basic extraction)
+                // Extract text between XML tags (basic extraction)
             let extractedText = extractTextFromDocxXML(data: fileData)
             if !extractedText.isEmpty {
                 return extractedText

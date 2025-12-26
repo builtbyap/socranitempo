@@ -157,13 +157,13 @@ struct ApplicationCard: View {
                 Button(action: {
                     showingStatusUpdate = true
                 }) {
-                    Text(application.status.capitalized)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(statusColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(statusColor.opacity(0.1))
-                        .cornerRadius(12)
+                Text(application.status.capitalized)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(statusColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(statusColor.opacity(0.1))
+                    .cornerRadius(12)
                 }
             }
             .padding(.horizontal, 16)

@@ -99,10 +99,10 @@ struct ResumeUploadView: View {
                                     if file.pathExtension.lowercased() == "pdf" {
                                         // PDF Preview - only load after view appears to prevent freezing
                                         if shouldLoadPDFPreview {
-                                            PDFPreviewView(url: file)
-                                                .frame(height: 500)
-                                                .background(Color(.systemGray5))
-                                                .cornerRadius(12)
+                                        PDFPreviewView(url: file)
+                                            .frame(height: 500)
+                                            .background(Color(.systemGray5))
+                                            .cornerRadius(12)
                                         } else {
                                             // Placeholder while waiting for view to be ready
                                             VStack(spacing: 16) {
@@ -236,41 +236,41 @@ struct ResumeUploadView: View {
                         // Upload Button
                         if selectedFile != nil && !fileName.isEmpty {
                             if !showPreview {
-                                // Upload Resume Button (will parse first)
-                                Button(action: {
+                            // Upload Resume Button (will parse first)
+                            Button(action: {
                                     print("🔘 Upload Resume button tapped")
                                     // Run parsing on background thread to prevent UI freeze
                                     Task.detached(priority: .userInitiated) {
                                         print("⚙️ Task.detached started on thread: \(Thread.current)")
-                                        await parseAndShowPreview()
-                                    }
-                                }) {
-                                    HStack {
-                                        if isParsing {
-                                            ProgressView()
-                                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                        } else {
-                                            Image(systemName: "arrow.up.circle.fill")
-                                                .font(.system(size: 20))
-                                        }
-                                        
-                                        Text(isParsing ? "Analyzing Resume..." : "Upload Resume")
-                                            .font(.system(size: 18, weight: .semibold))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 16)
-                                    .background(isParsing ? Color.blue.opacity(0.6) : Color.blue)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(12)
+                                    await parseAndShowPreview()
                                 }
-                                .disabled(isParsing)
-                                .padding(.horizontal)
-                                
-                                if isParsing {
-                                    ProgressView(value: uploadProgress)
-                                        .progressViewStyle(LinearProgressViewStyle())
-                                        .padding(.horizontal)
+                            }) {
+                                HStack {
+                                    if isParsing {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    } else {
+                                        Image(systemName: "arrow.up.circle.fill")
+                                            .font(.system(size: 20))
+                                    }
+                                    
+                                    Text(isParsing ? "Analyzing Resume..." : "Upload Resume")
+                                        .font(.system(size: 18, weight: .semibold))
                                 }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(isParsing ? Color.blue.opacity(0.6) : Color.blue)
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                            }
+                            .disabled(isParsing)
+                            .padding(.horizontal)
+                            
+                            if isParsing {
+                                ProgressView(value: uploadProgress)
+                                    .progressViewStyle(LinearProgressViewStyle())
+                                    .padding(.horizontal)
+                            }
                             } else {
                                 // Preview Tabs and Action Buttons (shown after preview)
                                     VStack(spacing: 16) {
@@ -348,7 +348,7 @@ struct ResumeUploadView: View {
                                         } else {
                                             // Parsed Info Tab
                                             if let resumeData = parsedResumeData {
-                                                VStack(spacing: 24) {
+                                                    VStack(spacing: 24) {
                                                         // Header
                                                         VStack(spacing: 8) {
                                                             HStack {
@@ -555,9 +555,9 @@ struct ResumeUploadView: View {
                                             }
                                         }
                                         .padding(.horizontal)
-                                    }
                                 }
                             }
+                        }
                         }
                         
                         // Error Message
@@ -677,7 +677,7 @@ struct ResumeUploadView: View {
                     Text("Loading...")
                         .onAppear {
                             showResumeDetails = false
-                        }
+                    }
                 }
             }
             .alert("Success", isPresented: $showSuccess) {
@@ -742,10 +742,10 @@ struct ResumeUploadView: View {
         // Update UI on main thread
         await MainActor.run {
             print("🎨 Updating UI on main thread")
-            isParsing = true
-            errorMessage = nil
-            uploadProgress = 0.0
-            showPreview = false
+        isParsing = true
+        errorMessage = nil
+        uploadProgress = 0.0
+        showPreview = false
         }
         
         do {
@@ -941,9 +941,9 @@ struct ParsedInfoBubbleSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 if !icon.isEmpty {
-                    Image(systemName: icon)
-                        .foregroundColor(color)
-                        .font(.title3)
+                Image(systemName: icon)
+                    .foregroundColor(color)
+                    .font(.title3)
                 }
                 Text(title)
                     .font(.system(size: 18, weight: .semibold))
@@ -1003,28 +1003,28 @@ struct ParsedInfoCard: View {
     
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold))
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.primary)
-                
-                if let subtitle = subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
-                }
-                
-                if let detail = detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-                
-                if let description = description, !description.isEmpty {
-                    Text(description)
-                        .font(.system(size: 14))
-                        .foregroundColor(.secondary)
-                        .padding(.top, 4)
+            
+            if let subtitle = subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+            }
+            
+            if let detail = detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+            
+            if let description = description, !description.isEmpty {
+                Text(description)
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
                 }
             }
             

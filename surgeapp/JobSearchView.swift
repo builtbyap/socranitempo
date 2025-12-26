@@ -544,7 +544,7 @@ struct JobPostCard: View {
                                 .padding(.vertical, 12)
                                 
                                 // Application URL
-                                if let url = post.url, !url.isEmpty {
+            if let url = post.url, !url.isEmpty {
                                     Divider()
                                         .padding(.leading, 56)
                                     
@@ -558,9 +558,9 @@ struct JobPostCard: View {
                                             Text("Apply")
                                                 .font(.system(size: 13))
                                                 .foregroundColor(.secondary)
-                                            Button(action: {
-                                                if let url = URL(string: url) {
-                                                    UIApplication.shared.open(url)
+                Button(action: {
+                    if let url = URL(string: url) {
+                        UIApplication.shared.open(url)
                                                 }
                                             }) {
                                                 HStack(spacing: 4) {

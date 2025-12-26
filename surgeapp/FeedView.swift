@@ -68,7 +68,7 @@ struct FeedView: View {
                         LazyVStack(spacing: 20) {
                             if selectedTab == 0 {
                                 // Jobs Feed
-                                if jobPosts.isEmpty {
+                                if filteredJobPosts.isEmpty {
                                     VStack(spacing: 16) {
                                         Image(systemName: "briefcase.fill")
                                             .font(.system(size: 60))
@@ -160,12 +160,13 @@ struct FeedView: View {
                             showingFilters = true
                         }) {
                             ZStack(alignment: .topTrailing) {
-                                Image(systemName: "line.3.horizontal.decrease.circle")
+                                Image(systemName: filters.hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                                     .font(.system(size: 20))
+                                    .foregroundColor(filters.hasActiveFilters ? .blue : .primary)
                                 
                                 if filters.hasActiveFilters {
                                     Circle()
-                                        .fill(Color.red)
+                                        .fill(Color.blue)
                                         .frame(width: 8, height: 8)
                                         .offset(x: 4, y: -4)
                                 }
@@ -176,6 +177,12 @@ struct FeedView: View {
             }
             .sheet(isPresented: $showingFilters) {
                 JobFiltersView(filters: $filters)
+                    .onDisappear {
+                        // When filters are applied, trigger a new search with updated filters
+                        Task {
+                            await fetchData()
+                        }
+                    }
             }
             .onAppear {
                 loadCareerInterests()
@@ -219,21 +226,53 @@ struct FeedView: View {
                 // Fetch from Supabase (existing jobs)
                 do {
                     let supabasePosts = try await SupabaseService.shared.fetchJobPosts()
-                    // Filter Supabase posts by career interests
-                    let filteredPosts = filterJobsByCareerInterests(supabasePosts, careerInterests: careerInterests)
+                    // Filter Supabase posts by job titles (career interests) from filters
+                    let filterKeywords = !filters.jobTitles.isEmpty ? Array(filters.jobTitles) : careerInterests
+                    let filteredPosts = filterJobsByCareerInterests(supabasePosts, careerInterests: filterKeywords)
                     allPosts.append(contentsOf: filteredPosts)
                 } catch {
                     print("⚠️ Failed to fetch from Supabase: \(error.localizedDescription)")
                 }
                 
+                // Use job titles from filters if available, otherwise use career interests
+                let searchKeywords: [String]
+                if !filters.jobTitles.isEmpty {
+                    searchKeywords = Array(filters.jobTitles)
+                } else {
+                    searchKeywords = careerInterests
+                }
+                
+                // Use locations from filters if available
+                let searchLocation: String?
+                if !filters.locations.isEmpty {
+                    searchLocation = Array(filters.locations).first
+                } else if !filters.location.isEmpty {
+                    searchLocation = filters.location
+                } else {
+                    searchLocation = nil
+                }
+                
                 // Fetch from job scraping service (job boards, company pages, ATS)
                 do {
                     print("🔍 Fetching jobs from backend...")
-                    print("🔍 Career interests: \(careerInterests)")
+                    print("🔍 Job titles/career interests: \(searchKeywords)")
+                    print("🔍 Location: \(searchLocation ?? "none")")
                     let scrapedPosts = try await JobScrapingService.shared.fetchJobsFromBackend(
-                        careerInterests: careerInterests
+                        keywords: searchKeywords.isEmpty ? nil : searchKeywords.joined(separator: " OR "),
+                        location: searchLocation,
+                        careerInterests: searchKeywords
                     )
                     print("✅ Fetched \(scrapedPosts.count) jobs from backend")
+                    if scrapedPosts.isEmpty {
+                        print("⚠️ WARNING: Backend returned 0 jobs!")
+                    } else {
+                        print("📋 Sample job from backend:")
+                        if let sample = scrapedPosts.first {
+                            print("   - ID: \(sample.id)")
+                            print("   - Title: \(sample.title)")
+                            print("   - Company: \(sample.company)")
+                        }
+                    }
                     allPosts.append(contentsOf: scrapedPosts)
                 } catch {
                     print("⚠️ Backend API error: \(error.localizedDescription)")
@@ -241,7 +280,9 @@ struct FeedView: View {
                     print("⚠️ Attempting direct scraping as fallback...")
                     do {
                         let directPosts = try await JobScrapingService.shared.fetchJobsFromAllSources(
-                            careerInterests: careerInterests
+                            keywords: searchKeywords.isEmpty ? nil : searchKeywords.joined(separator: " OR "),
+                            location: searchLocation,
+                            careerInterests: searchKeywords
                         )
                         print("✅ Fetched \(directPosts.count) jobs from direct scraping")
                         allPosts.append(contentsOf: directPosts)
@@ -251,6 +292,7 @@ struct FeedView: View {
                 }
                 
                 await MainActor.run {
+                    print("📊 Processing \(allPosts.count) total posts from all sources")
                     var uniquePosts: [JobPost] = []
                     var seenIds = Set<String>()
                     
@@ -261,6 +303,8 @@ struct FeedView: View {
                         }
                     }
                     
+                    print("📊 After deduplication: \(uniquePosts.count) unique posts")
+                    
                     // Sort by posted date (most recent first)
                     uniquePosts.sort { post1, post2 in
                         post1.postedDate > post2.postedDate
@@ -269,6 +313,21 @@ struct FeedView: View {
                     self.allJobPosts = uniquePosts
                     self.jobPosts = uniquePosts // Keep for compatibility
                     self.loading = false
+                    
+                    print("✅ Updated UI with \(uniquePosts.count) jobs")
+                    print("   - allJobPosts count: \(self.allJobPosts.count)")
+                    print("   - jobPosts count: \(self.jobPosts.count)")
+                    print("   - filteredJobPosts count: \(self.filteredJobPosts.count)")
+                    
+                    // Debug: Print first job if available
+                    if let firstJob = uniquePosts.first {
+                        print("📋 First job sample:")
+                        print("   - ID: \(firstJob.id)")
+                        print("   - Title: \(firstJob.title)")
+                        print("   - Company: \(firstJob.company)")
+                        print("   - Location: \(firstJob.location)")
+                        print("   - Posted Date: \(firstJob.postedDate)")
+                    }
                     
                     // Queue jobs for auto-apply (like sorce.jobs)
                     // This will automatically apply to company career pages
