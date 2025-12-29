@@ -193,16 +193,4 @@ struct QueuedApplication {
 }
 
 // MARK: - Auto Apply Error
-enum AutoApplyError: LocalizedError {
-    case noURL
-    case processingFailed
-    
-    var errorDescription: String? {
-        switch self {
-        case .noURL:
-            return "Job post does not have a valid application URL"
-        case .processingFailed:
-            return "Failed to process auto-application"
-        }
-    }
-}
+// Note: AutoApplyError is defined in AutoApplyService.swift to avoid duplication

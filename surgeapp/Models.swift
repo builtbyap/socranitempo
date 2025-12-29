@@ -65,9 +65,11 @@ struct Application: Identifiable, Codable {
     let jobPostId: String
     let jobTitle: String
     let company: String
-    let status: String // "applied", "viewed", "interview", "rejected", "accepted"
+    let status: String // "applied", "viewed", "interview", "rejected", "accepted", "pending_questions"
     let appliedDate: String
     let resumeUrl: String?
+    let jobUrl: String? // Store job URL for resuming automation
+    let pendingQuestions: [PendingQuestion]? // Questions that need user input
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -77,6 +79,66 @@ struct Application: Identifiable, Codable {
         case status
         case appliedDate = "applied_date"
         case resumeUrl = "resume_url"
+        case jobUrl = "job_url"
+        case pendingQuestions = "pending_questions"
+    }
+}
+
+// MARK: - Pending Question Model
+struct PendingQuestion: Identifiable, Codable {
+    let id: Int
+    let fieldType: String
+    let inputType: String
+    let name: String
+    let question: String
+    let options: [AnswerOption]?
+    let required: Bool
+    let selector: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id = "index"
+        case fieldType
+        case inputType
+        case name
+        case question
+        case options
+        case required
+        case selector
+    }
+    
+    // Regular initializer for manual creation
+    init(
+        id: Int,
+        fieldType: String,
+        inputType: String,
+        name: String,
+        question: String,
+        options: [AnswerOption]?,
+        required: Bool,
+        selector: String
+    ) {
+        self.id = id
+        self.fieldType = fieldType
+        self.inputType = inputType
+        self.name = name
+        self.question = question
+        self.options = options
+        self.required = required
+        self.selector = selector
+    }
+    
+    // Custom decoder to handle missing fields
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        // Provide default for fieldType if missing
+        fieldType = try container.decodeIfPresent(String.self, forKey: .fieldType) ?? "input"
+        inputType = try container.decodeIfPresent(String.self, forKey: .inputType) ?? "text"
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        question = try container.decode(String.self, forKey: .question)
+        options = try container.decodeIfPresent([AnswerOption].self, forKey: .options)
+        required = try container.decodeIfPresent(Bool.self, forKey: .required) ?? false
+        selector = try container.decodeIfPresent(String.self, forKey: .selector) ?? ""
     }
 }
 

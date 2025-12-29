@@ -274,9 +274,37 @@ class SupabaseService {
             throw SupabaseError.httpError(statusCode: httpResponse.statusCode, message: errorMessage)
         }
         
+        // First, try to decode directly (works if all fields are present)
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        // Don't use convertFromSnakeCase since Application has explicit CodingKeys
+        
+        do {
         return try decoder.decode([Application].self, from: data)
+        } catch let decodingError as DecodingError {
+            // Log the decoding error for debugging
+            print("❌ Failed to decode applications: \(decodingError)")
+            print("📋 Attempting fallback decoding with missing field handling...")
+            
+            // Fallback: Decode manually to handle missing fields
+            guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                print("❌ Response is not a JSON array")
+                throw SupabaseError.httpError(statusCode: 500, message: "Failed to decode applications: Invalid JSON format")
+            }
+            
+            var applications: [Application] = []
+            for json in jsonArray {
+                do {
+                    let app = try decodeApplication(from: json)
+                    applications.append(app)
+                } catch {
+                    print("⚠️ Failed to decode one application, skipping: \(error)")
+                    // Continue with other applications
+                }
+            }
+            
+            print("✅ Successfully decoded \(applications.count) out of \(jsonArray.count) applications")
+            return applications
+        }
     }
     
     func insertApplication(_ application: Application) async throws {
@@ -298,8 +326,36 @@ class SupabaseService {
         request.setValue("return=representation", forHTTPHeaderField: "Prefer")
         
         let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        let applicationData = try encoder.encode(application)
+        // Don't use convertToSnakeCase since Application has explicit CodingKeys
+        // But we need to manually handle pending_questions as JSONB
+        var jsonDict: [String: Any] = [:]
+        jsonDict["id"] = application.id
+        jsonDict["job_post_id"] = application.jobPostId
+        jsonDict["job_title"] = application.jobTitle
+        jsonDict["company"] = application.company
+        jsonDict["status"] = application.status
+        jsonDict["applied_date"] = application.appliedDate
+        jsonDict["resume_url"] = application.resumeUrl as Any
+        jsonDict["job_url"] = application.jobUrl as Any
+        
+        // Encode pending_questions as JSONB (array of objects)
+        if let questions = application.pendingQuestions, !questions.isEmpty {
+            do {
+                let questionsData = try JSONEncoder().encode(questions)
+                if let questionsArray = try? JSONSerialization.jsonObject(with: questionsData) as? [[String: Any]] {
+                    jsonDict["pending_questions"] = questionsArray
+                    print("📋 Encoding \(questions.count) questions as JSONB array")
+                } else {
+                    print("⚠️ Failed to convert questions to array format")
+                }
+            } catch {
+                print("⚠️ Failed to encode questions: \(error)")
+            }
+        } else {
+            jsonDict["pending_questions"] = NSNull()
+        }
+        
+        let applicationData = try JSONSerialization.data(withJSONObject: jsonDict)
         request.httpBody = applicationData
         
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -312,6 +368,126 @@ class SupabaseService {
             let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
             throw SupabaseError.httpError(statusCode: httpResponse.statusCode, message: "Failed to insert application: \(errorMessage)")
         }
+    }
+    
+    // MARK: - Helper: Decode Application with missing fields handling
+    private func decodeApplication(from json: [String: Any]) throws -> Application {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        
+        // Decode pending_questions if present (it's JSONB in database)
+        var pendingQuestions: [PendingQuestion]? = nil
+        
+        // Handle different JSONB formats from Supabase
+        if let pendingQuestionsValue = json["pending_questions"] {
+            print("🔍 Found pending_questions value, type: \(type(of: pendingQuestionsValue))")
+            
+            // Case 1: Already an array of dictionaries (most common for JSONB)
+            if let pendingQuestionsArray = pendingQuestionsValue as? [[String: Any]] {
+                print("📋 Decoding as array of dictionaries (\(pendingQuestionsArray.count) items)")
+                pendingQuestions = pendingQuestionsArray.compactMap { questionJson in
+                    do {
+                        // Ensure all required fields have defaults
+                        var safeQuestionJson = questionJson
+                        if safeQuestionJson["fieldType"] == nil {
+                            safeQuestionJson["fieldType"] = "input"
+                        }
+                        if safeQuestionJson["inputType"] == nil {
+                            safeQuestionJson["inputType"] = "text"
+                        }
+                        if safeQuestionJson["name"] == nil {
+                            safeQuestionJson["name"] = ""
+                        }
+                        if safeQuestionJson["required"] == nil {
+                            safeQuestionJson["required"] = false
+                        }
+                        if safeQuestionJson["selector"] == nil {
+                            safeQuestionJson["selector"] = ""
+                        }
+                        
+                        let jsonData = try JSONSerialization.data(withJSONObject: safeQuestionJson)
+                        let question = try JSONDecoder().decode(PendingQuestion.self, from: jsonData)
+                        print("✅ Decoded question: \(question.question)")
+                        return question
+                    } catch {
+                        print("⚠️ Failed to decode question: \(error)")
+                        if let questionText = questionJson["question"] as? String {
+                            print("   Question text was: \(questionText)")
+                        }
+                        print("   Available keys: \(questionJson.keys.joined(separator: ", "))")
+                        return nil
+                    }
+                }
+            }
+            // Case 2: JSON string that needs parsing
+            else if let pendingQuestionsString = pendingQuestionsValue as? String,
+                    !pendingQuestionsString.isEmpty,
+                    pendingQuestionsString != "null" {
+                print("📋 Decoding as JSON string")
+                if let pendingQuestionsData = pendingQuestionsString.data(using: .utf8) {
+                    // Try to decode as array directly
+                    if let questions = try? JSONDecoder().decode([PendingQuestion].self, from: pendingQuestionsData) {
+                        pendingQuestions = questions
+                        print("✅ Decoded \(questions.count) questions from JSON string")
+                    }
+                    // Try to parse as JSON first, then decode
+                    else if let jsonObject = try? JSONSerialization.jsonObject(with: pendingQuestionsData),
+                            let questionsArray = jsonObject as? [[String: Any]] {
+                        print("📋 Parsed JSON string to array (\(questionsArray.count) items)")
+                        pendingQuestions = questionsArray.compactMap { questionJson in
+                            do {
+                                // Ensure all required fields have defaults
+                                var safeQuestionJson = questionJson
+                                if safeQuestionJson["fieldType"] == nil {
+                                    safeQuestionJson["fieldType"] = "input"
+                                }
+                                if safeQuestionJson["inputType"] == nil {
+                                    safeQuestionJson["inputType"] = "text"
+                                }
+                                if safeQuestionJson["name"] == nil {
+                                    safeQuestionJson["name"] = ""
+                                }
+                                if safeQuestionJson["required"] == nil {
+                                    safeQuestionJson["required"] = false
+                                }
+                                if safeQuestionJson["selector"] == nil {
+                                    safeQuestionJson["selector"] = ""
+                                }
+                                
+                                let jsonData = try JSONSerialization.data(withJSONObject: safeQuestionJson)
+                                return try JSONDecoder().decode(PendingQuestion.self, from: jsonData)
+                            } catch {
+                                print("⚠️ Failed to decode question: \(error)")
+                                return nil
+                            }
+                        }
+                    }
+                }
+            }
+            // Case 3: NSNull or nil
+            else if pendingQuestionsValue is NSNull {
+                print("📋 pending_questions is NSNull")
+                pendingQuestions = nil
+            } else {
+                print("⚠️ Unknown pending_questions format: \(type(of: pendingQuestionsValue))")
+            }
+        } else {
+            print("📋 No pending_questions field found in JSON")
+        }
+        
+        print("📋 Final decoded count: \(pendingQuestions?.count ?? 0) pending questions")
+        
+        return Application(
+            id: json["id"] as? String ?? UUID().uuidString,
+            jobPostId: json["job_post_id"] as? String ?? "",
+            jobTitle: json["job_title"] as? String ?? "",
+            company: json["company"] as? String ?? "",
+            status: json["status"] as? String ?? "applied",
+            appliedDate: json["applied_date"] as? String ?? dateFormatter.string(from: Date()),
+            resumeUrl: json["resume_url"] as? String,
+            jobUrl: json["job_url"] as? String,
+            pendingQuestions: pendingQuestions
+        )
     }
     
     // MARK: - Update Application Status

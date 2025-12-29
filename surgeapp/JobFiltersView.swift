@@ -638,19 +638,54 @@ struct JobFilters {
         // Filter by job type
         if !jobTypes.isEmpty {
             filtered = filtered.filter { job in
-                guard let jobType = job.jobType else {
-                    // If job type is not specified, check title for internship keywords
-                    if jobTypes.contains(.internship) {
-                        let titleLower = job.title.lowercased()
-                        return titleLower.contains("intern") || titleLower.contains("internship")
-                    }
-                    return false
-                }
-                return jobTypes.contains { type in
+                let titleLower = job.title.lowercased()
+                let descriptionLower = (job.description ?? "").lowercased()
+                let combinedText = "\(titleLower) \(descriptionLower)"
+                
+                // Check if job type is specified
+                if let jobType = job.jobType {
                     let jobTypeLower = jobType.lowercased()
-                    let typeLower = type.rawValue.lowercased()
-                    return jobTypeLower.contains(typeLower) || 
-                           (type == .internship && (jobTypeLower.contains("intern") || job.title.lowercased().contains("intern")))
+                    return jobTypes.contains { type in
+                        let typeLower = type.rawValue.lowercased()
+                        // Direct match
+                        if jobTypeLower.contains(typeLower) || typeLower.contains(jobTypeLower) {
+                            return true
+                        }
+                        // Special handling for internship
+                        if type == .internship {
+                            return jobTypeLower.contains("intern") || 
+                                   titleLower.contains("intern") ||
+                                   titleLower.contains("internship")
+                        }
+                        return false
+                    }
+                } else {
+                    // If job type is not specified, check title and description for keywords
+                    return jobTypes.contains { type in
+                        switch type {
+                        case .internship:
+                            return titleLower.contains("intern") || 
+                                   titleLower.contains("internship") ||
+                                   combinedText.contains("intern") ||
+                                   combinedText.contains("internship")
+                        case .fullTime:
+                            return titleLower.contains("full") && titleLower.contains("time") ||
+                                   combinedText.contains("full-time") ||
+                                   combinedText.contains("full time")
+                        case .partTime:
+                            return titleLower.contains("part") && titleLower.contains("time") ||
+                                   combinedText.contains("part-time") ||
+                                   combinedText.contains("part time")
+                        case .contract:
+                            return titleLower.contains("contract") ||
+                                   combinedText.contains("contract")
+                        case .temporary:
+                            return titleLower.contains("temporary") ||
+                                   titleLower.contains("temp") ||
+                                   combinedText.contains("temporary") ||
+                                   combinedText.contains("temp")
+                        }
+                    }
                 }
             }
         }

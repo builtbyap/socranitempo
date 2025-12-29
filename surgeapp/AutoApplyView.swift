@@ -152,11 +152,41 @@ struct AutoApplyView: View {
                 startAutomation()
             }
             .sheet(isPresented: $showingQuestion) {
-                if currentQuestionIndex < detectedQuestions.count {
-                    QuestionAnswerView(
-                        question: detectedQuestions[currentQuestionIndex],
-                        onAnswer: { answer in
-                            handleQuestionAnswer(answer)
+                if !detectedQuestions.isEmpty {
+                    // Convert DetectedQuestion to PendingQuestion for compatibility
+                    let pendingQuestions = detectedQuestions.map { detected in
+                        PendingQuestion(
+                            id: detected.id,
+                            fieldType: detected.fieldType,
+                            inputType: detected.inputType,
+                            name: detected.name,
+                            question: detected.question,
+                            options: detected.options.isEmpty ? nil : detected.options,
+                            required: detected.required,
+                            selector: detected.selector
+                        )
+                    }
+                    
+                    InlineQuestionAnswerView(
+                        questions: pendingQuestions,
+                        jobTitle: job.title,
+                        company: job.company,
+                        onAnswersSubmitted: { answers in
+                            // Fill all answers into the form
+                            for (questionId, answer) in answers {
+                                let fillScript = QuestionDetectionService.shared.fillAnswerScript(
+                                    questionIndex: questionId,
+                                    answer: answer
+                                )
+                                webViewModel.executeScript(fillScript)
+                            }
+                            
+                            // Wait a moment for answers to be filled
+                            Task {
+                                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                                showingQuestion = false
+                                await autoSubmitApplication()
+                            }
                         }
                     )
                 }

@@ -155,12 +155,12 @@ serve(async (req) => {
     console.log('\n📊 Scraping Summary:')
     console.log(`   - Searched ${queriesToSearch.length} queries: ${queriesToSearch.join(', ')}`)
     console.log(`   - Location: ${location || 'all locations'}`)
-    console.log(`   - Career interests: ${careerInterests.length > 0 ? careerInterests.join(', ') : 'none'}`)
+      console.log(`   - Career interests: ${careerInterests.length > 0 ? careerInterests.join(', ') : 'none'}`)
     console.log(`   - Total jobs found: ${allJobs.length}`)
-    console.log('📊 Jobs by source:')
-    for (const [source, count] of Object.entries(sourceStats)) {
-      console.log(`   - ${source}: ${count} jobs`)
-    }
+      console.log('📊 Jobs by source:')
+      for (const [source, count] of Object.entries(sourceStats)) {
+        console.log(`   - ${source}: ${count} jobs`)
+      }
     
     if (allJobs.length === 0) {
       console.log('⚠️ No jobs found from scraping - returning empty array (no test data)')
@@ -372,7 +372,7 @@ async function scrapeGreenhouse(keywords: string, location: string): Promise<any
               }
               
               if (!shouldInclude) {
-                continue
+                  continue
               }
               
               matchedJobs++
@@ -523,7 +523,7 @@ async function scrapeLever(keywords: string, location: string): Promise<any[]> {
               }
               
               if (!shouldInclude) {
-                continue
+                  continue
               }
               
               matchedJobs++

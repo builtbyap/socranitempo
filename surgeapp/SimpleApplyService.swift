@@ -122,6 +122,15 @@ class SimpleApplyService {
     
     // MARK: - Submit Application
     func submitApplication(job: JobPost, applicationData: ApplicationData) async throws {
+        try await submitApplicationWithQuestions(job: job, applicationData: applicationData, questions: nil)
+    }
+    
+    // MARK: - Submit Application with Questions
+    func submitApplicationWithQuestions(
+        job: JobPost,
+        applicationData: ApplicationData,
+        questions: [PendingQuestion]?
+    ) async throws {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         
@@ -149,19 +158,38 @@ class SimpleApplyService {
             }
         }
         
+        // Determine status based on questions
+        let status = (questions != nil && !questions!.isEmpty) ? "pending_questions" : "applied"
+        
+        print("💾 Saving application with status: \(status)")
+        if let questions = questions, !questions.isEmpty {
+            print("📋 Saving \(questions.count) questions:")
+            for (index, question) in questions.enumerated() {
+                print("   \(index + 1). \(question.question) (required: \(question.required))")
+            }
+        } else {
+            print("📋 No questions to save")
+        }
+        
         // Create application record
         let application = Application(
             id: UUID().uuidString,
             jobPostId: job.id,
             jobTitle: job.title,
             company: job.company,
-            status: "applied",
+            status: status,
             appliedDate: dateFormatter.string(from: Date()),
-            resumeUrl: resumePublicURL
+            resumeUrl: resumePublicURL,
+            jobUrl: job.url,
+            pendingQuestions: questions
         )
+        
+        print("💾 Application created with pendingQuestions count: \(application.pendingQuestions?.count ?? 0)")
         
         // Save to Supabase
         try await SupabaseService.shared.insertApplication(application)
+        
+        print("✅ Application saved successfully")
         
         // Send email notification
         Task.detached {

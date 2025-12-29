@@ -264,7 +264,9 @@ struct JobSearchView: View {
                     company: post.company,
                     status: "applied",
                     appliedDate: dateFormatter.string(from: Date()),
-                    resumeUrl: nil // TODO: Get from uploaded resume
+                    resumeUrl: nil, // TODO: Get from uploaded resume
+                    jobUrl: post.url,
+                    pendingQuestions: nil
                 )
                 
                 try await SupabaseService.shared.insertApplication(application)

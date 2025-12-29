@@ -88,17 +88,15 @@ struct FeedView: View {
                                             isSaved: false,
                                             onToggleSave: {},
                                             onSimpleApply: {
-                                                // Get profile data
-                                                let profileData = SimpleApplyService.shared.getUserProfileData()
-                                                let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
-                                                applicationData = appData
-                                                
                                                 // Check if job has URL for auto-apply
                                                 if let jobURL = post.url, !jobURL.isEmpty {
-                                                    // Directly start AI Auto-Apply (like sorce.jobs)
+                                                    // Fully automated application using Playwright (like sorce.jobs)
                                                     showingAutoApply = post
                                                 } else {
                                                     // No URL, show review screen instead
+                                                    let profileData = SimpleApplyService.shared.getUserProfileData()
+                                                    let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
+                                                    applicationData = appData
                                                     showingSimpleApply = post
                                                 }
                                             }
@@ -206,9 +204,8 @@ struct FeedView: View {
                 get: { showingAutoApply },
                 set: { showingAutoApply = $0 }
             )) { job in
-                if let appData = applicationData {
-                    AutoApplyView(job: job, applicationData: appData)
-                }
+                // Use Playwright-based fully automated application (like sorce.jobs)
+                AutoApplyProgressView(job: job)
             }
         }
     }
@@ -235,11 +232,27 @@ struct FeedView: View {
                 }
                 
                 // Use job titles from filters if available, otherwise use career interests
-                let searchKeywords: [String]
+                var searchKeywords: [String]
                 if !filters.jobTitles.isEmpty {
                     searchKeywords = Array(filters.jobTitles)
                 } else {
                     searchKeywords = careerInterests
+                }
+                
+                // If internship filter is selected, add "internship" to search keywords
+                if filters.jobTypes.contains(.internship) {
+                    // Add "internship" to each keyword to search for internship positions
+                    var internshipKeywords: [String] = []
+                    for keyword in searchKeywords {
+                        internshipKeywords.append("\(keyword) internship")
+                        internshipKeywords.append("internship \(keyword)")
+                    }
+                    // Also add standalone "internship" if no keywords
+                    if searchKeywords.isEmpty {
+                        internshipKeywords.append("internship")
+                    }
+                    searchKeywords = internshipKeywords
+                    print("🔍 Added internship keywords: \(internshipKeywords)")
                 }
                 
                 // Use locations from filters if available

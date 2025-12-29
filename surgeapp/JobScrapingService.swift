@@ -419,15 +419,15 @@ class JobScrapingService {
             // Otherwise, return all jobs (they're already filtered by the edge function)
             if jobs.count > 200 && !careerInterests.isEmpty {
                 print("📊 Applying additional career interests filter (\(jobs.count) jobs, threshold: 200)")
-                let filtered = filterJobsByCareerInterests(jobs, careerInterests: careerInterests)
-                print("✅ After filtering: \(filtered.count) jobs")
+            let filtered = filterJobsByCareerInterests(jobs, careerInterests: careerInterests)
+            print("✅ After filtering: \(filtered.count) jobs")
                 
                 // If filtering resulted in too few jobs, return all jobs
                 if filtered.count < 20 {
                     print("⚠️ Career interests filter too strict (\(filtered.count) jobs), returning all \(jobs.count) jobs")
                     return jobs
                 }
-                return filtered
+            return filtered
             } else {
                 print("ℹ️ Skipping additional filtering - edge function already filtered (\(jobs.count) jobs)")
                 return jobs
@@ -477,8 +477,8 @@ class JobScrapingService {
                 
                 // Also check for full phrase match (original behavior)
                 let matchesFullPhrase = jobText.contains(interestLower) ||
-                                       job.title.lowercased().contains(interestLower) ||
-                                       (job.description?.lowercased().contains(interestLower) ?? false)
+                       job.title.lowercased().contains(interestLower) ||
+                       (job.description?.lowercased().contains(interestLower) ?? false)
                 
                 return matchesAnyWord || matchesFullPhrase
             }
