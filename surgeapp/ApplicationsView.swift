@@ -59,6 +59,11 @@ struct ApplicationsView: View {
         return appliedApplications.filter { $0.status == "rejected" }
     }
     
+    // Passed applications (jobs user passed on)
+    var passedApplications: [Application] {
+        return applications.filter { $0.status == "passed" }
+    }
+    
     // Recent applications (last 5, sorted by date)
     var recentApplications: [Application] {
         return appliedApplications
@@ -179,13 +184,23 @@ struct ApplicationsView: View {
                                 )
                             }
                             
-                            // Jobs You Passed On (for future use)
-                            SectionRow(
-                                icon: "hand.thumbsup.fill",
-                                title: "Jobs you passed on",
-                                count: 0
-                            ) {
-                                // Future implementation
+                            // Jobs You Passed On
+                            if !passedApplications.isEmpty {
+                                SectionRow(
+                                    icon: "hand.thumbsup.fill",
+                                    title: "Jobs you passed on",
+                                    count: passedApplications.count
+                                ) {
+                                    selectedSection = .passed
+                                }
+                            } else {
+                                SectionRow(
+                                    icon: "hand.thumbsup.fill",
+                                    title: "Jobs you passed on",
+                                    count: 0
+                                ) {
+                                    // No passed jobs yet
+                                }
                             }
                             .overlay(
                                 Rectangle()
@@ -274,7 +289,7 @@ struct ApplicationsView: View {
         case .failed:
             return failedApplications
         case .passed:
-            return []
+            return passedApplications
         }
     }
     
@@ -523,6 +538,12 @@ struct SectionDetailView: View {
                             PendingQuestionsCard(application: application)
                                 .padding(.horizontal, 20)
                         }
+                    } else if section == .passed {
+                        // Show passed jobs with special styling
+                        ForEach(applications) { application in
+                            PassedJobCard(application: application)
+                                .padding(.horizontal, 20)
+                        }
                     } else {
                         // Show regular application cards
                         ForEach(applications) { application in
@@ -740,6 +761,94 @@ struct ApplicationCard: View {
             }
         }
         return dateString
+    }
+}
+
+// MARK: - Passed Job Card
+struct PassedJobCard: View {
+    let application: Application
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Company Avatar
+            ZStack {
+                Circle()
+                    .fill(Color(.systemGray5))
+                    .frame(width: 50, height: 50)
+                
+                Text(String(application.company.prefix(1)).uppercased())
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.primary)
+            }
+            
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    // Passed Badge
+                    HStack(spacing: 4) {
+                        Image(systemName: "hand.thumbsup.fill")
+                            .foregroundColor(.gray)
+                            .font(.system(size: 12))
+                        
+                        Text("Passed")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.gray)
+                    }
+                    
+                    Spacer()
+                    
+                    // Time ago
+                    Text(formatTimeAgo(application.appliedDate))
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+                
+                Text(application.jobTitle)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                
+                Text(application.company)
+                    .font(.system(size: 15))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(16)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(.systemGray5), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
+    }
+    
+    private func formatTimeAgo(_ dateString: String) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let date = formatter.date(from: dateString) else {
+            return dateString
+        }
+        
+        let calendar = Calendar.current
+        let now = Date()
+        let components = calendar.dateComponents([.minute, .hour, .day, .weekOfYear, .month, .year], from: date, to: now)
+        
+        if let year = components.year, year > 0 {
+            return "\(year)y ago"
+        } else if let month = components.month, month > 0 {
+            return "\(month)mo ago"
+        } else if let week = components.weekOfYear, week > 0 {
+            return "\(week)w ago"
+        } else if let day = components.day, day > 0 {
+            return "\(day)d ago"
+        } else if let hour = components.hour, hour > 0 {
+            return "\(hour)h ago"
+        } else if let minute = components.minute, minute > 0 {
+            return "\(minute)m ago"
+        } else {
+            return "just now"
+        }
     }
 }
 

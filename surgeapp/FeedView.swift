@@ -283,7 +283,7 @@ struct FeedView: View {
         // Mark current job as passed/rejected
         if currentJobIndex < filteredJobPosts.count {
             let currentJob = filteredJobPosts[currentJobIndex]
-            markJobAsPassed(currentJob.id)
+            markJobAsPassed(currentJob)
         }
         
         // Move to next job
@@ -303,10 +303,44 @@ struct FeedView: View {
     }
     
     // MARK: - Mark Job as Passed
-    private func markJobAsPassed(_ jobId: String) {
-        passedJobIds.insert(jobId)
+    private func markJobAsPassed(_ job: JobPost) {
+        // Add to local set for immediate filtering
+        passedJobIds.insert(job.id)
         savePassedJobs()
-        print("📋 Marked job \(jobId) as passed - will not show again")
+        
+        // Save to Supabase as a "passed" application
+        Task {
+            do {
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyy-MM-dd"
+                
+                let passedApplication = Application(
+                    id: UUID().uuidString,
+                    jobPostId: job.id,
+                    jobTitle: job.title,
+                    company: job.company,
+                    status: "passed", // Use "passed" status
+                    appliedDate: dateFormatter.string(from: Date()),
+                    resumeUrl: nil,
+                    jobUrl: job.url,
+                    pendingQuestions: nil
+                )
+                
+                try await SupabaseService.shared.insertApplication(passedApplication)
+                print("✅ Saved passed job to Applications: \(job.title)")
+                
+                // Notify ApplicationsView to refresh
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("ApplicationStatusUpdated"),
+                    object: nil
+                )
+            } catch {
+                print("⚠️ Failed to save passed job to Supabase: \(error.localizedDescription)")
+                // Still keep it in local storage even if Supabase save fails
+            }
+        }
+        
+        print("📋 Marked job \(job.id) as passed - will not show again")
     }
     
     // MARK: - Load Passed Jobs
