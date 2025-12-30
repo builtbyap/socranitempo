@@ -577,6 +577,98 @@ class SupabaseService {
     }
     
     // MARK: - Resume Data
+    // MARK: - Insert Application Email
+    func insertApplicationEmail(_ email: ApplicationEmail) async throws {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/application_emails") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("public", forHTTPHeaderField: "Accept-Profile")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        
+        let jsonDict: [String: Any] = [
+            "id": email.id,
+            "from_email": email.from,
+            "subject": email.subject,
+            "body": email.body,
+            "received_date": email.date,
+            "is_application_confirmation": email.isApplicationConfirmation
+        ]
+        
+        let jsonData = try JSONSerialization.data(withJSONObject: jsonDict)
+        request.httpBody = jsonData
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw SupabaseError.requestFailed
+        }
+    }
+    
+    // MARK: - Fetch Application Emails
+    func fetchApplicationEmails() async throws -> [ApplicationEmail] {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/application_emails?select=*&order=received_date.desc") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("public", forHTTPHeaderField: "Accept-Profile")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw SupabaseError.requestFailed
+        }
+        
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw SupabaseError.httpError(statusCode: httpResponse.statusCode, message: errorMessage)
+        }
+        
+        guard let jsonArray = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        
+        return jsonArray.compactMap { json in
+            guard let id = json["id"] as? String,
+                  let from = json["from_email"] as? String,
+                  let subject = json["subject"] as? String,
+                  let body = json["body"] as? String,
+                  let date = json["received_date"] as? String else {
+                return nil
+            }
+            
+            return ApplicationEmail(
+                id: id,
+                from: from,
+                subject: subject,
+                body: body,
+                date: date,
+                isApplicationConfirmation: json["is_application_confirmation"] as? Bool ?? false
+            )
+        }
+    }
+    
     func insertResumeData(_ resumeData: ResumeData) async throws {
         guard supabaseURL != "YOUR_SUPABASE_URL" else {
             throw SupabaseError.notConfigured

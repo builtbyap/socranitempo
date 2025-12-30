@@ -98,7 +98,7 @@ struct ApplicationsView: View {
                                         .font(.system(size: 16, weight: .medium))
                                         .foregroundColor(.white)
                                     
-                                    Spacer()
+                    Spacer()
                                     
                                     Image(systemName: "chevron.right")
                                         .font(.system(size: 14, weight: .semibold))
@@ -219,8 +219,8 @@ struct ApplicationsView: View {
                                     + Text(" >")
                                         .font(.system(size: 16, weight: .medium))
                                         .foregroundColor(.blue)
-                                }
-                            }
+                }
+            }
                             .padding(.horizontal, 20)
                             
                             VStack(spacing: 12) {
@@ -246,16 +246,16 @@ struct ApplicationsView: View {
                 }
             }
         }
-        .onAppear {
-            Task {
-                await fetchApplications()
+            .onAppear {
+                Task {
+                    await fetchApplications()
+                }
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ApplicationStatusUpdated"))) { _ in
-            Task {
-                await fetchApplications()
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ApplicationStatusUpdated"))) { _ in
+                Task {
+                    await fetchApplications()
+                }
             }
-        }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ApplicationPendingQuestions"))) { _ in
             Task {
                 await fetchApplications()
@@ -647,44 +647,44 @@ struct ApplicationCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(application.jobTitle)
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundColor(.primary)
+                    Text(application.jobTitle)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.primary)
                                 .lineLimit(2)
-                            
-                            Text(application.company)
+                    
+                    Text(application.company)
                                 .font(.system(size: 15))
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        Spacer()
-                        
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
                         // Status badge
-                        Text(application.status.capitalized)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(statusColor)
-                            .padding(.horizontal, 10)
+                Text(application.status.capitalized)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(statusColor)
+                    .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(statusColor.opacity(0.1))
+                    .background(statusColor.opacity(0.1))
                             .cornerRadius(8)
-                    }
+                }
                     
                     // Date
                     HStack(spacing: 4) {
                         Image(systemName: "clock")
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                    .foregroundColor(.secondary)
                         Text(formatDate(application.appliedDate))
                             .font(.system(size: 13))
-                            .foregroundColor(.secondary)
+                    .foregroundColor(.secondary)
                     }
                 }
             }
             .padding(16)
-            .background(Color(.systemBackground))
+        .background(Color(.systemBackground))
             .cornerRadius(12)
             .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
-            .overlay(
+        .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Color(.systemGray6), lineWidth: 1)
             )

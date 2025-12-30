@@ -121,11 +121,11 @@ struct QuestionAnswerView: View {
                                     // Show options as tappable bubbles
                                     VStack(alignment: .leading, spacing: 10) {
                                         ForEach(options, id: \.value) { option in
-                                            Button(action: {
+                                        Button(action: {
                                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                                     answers[currentQuestion.id] = option.value
                                                 }
-                                            }) {
+                                        }) {
                                                 HStack(spacing: 12) {
                                                     // Selection indicator
                                                     ZStack {
@@ -145,13 +145,13 @@ struct QuestionAnswerView: View {
                                                     }
                                                     
                                                     // Option text
-                                                    Text(option.text.isEmpty ? option.value : option.text)
-                                                        .font(.system(size: 16))
-                                                        .foregroundColor(.primary)
+                                                Text(option.text.isEmpty ? option.value : option.text)
+                                                    .font(.system(size: 16))
+                                                    .foregroundColor(.primary)
                                                         .multilineTextAlignment(.leading)
-                                                    
-                                                    Spacer()
-                                                }
+                                                
+                                                Spacer()
+                                            }
                                                 .padding(.vertical, 14)
                                                 .padding(.horizontal, 16)
                                                 .background(
@@ -159,28 +159,28 @@ struct QuestionAnswerView: View {
                                                         ? Color.blue.opacity(0.1) 
                                                         : Color(.systemGray6)
                                                 )
-                                                .cornerRadius(12)
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 12)
+                                            .cornerRadius(12)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
                                                         .stroke(
                                                             answers[currentQuestion.id] == option.value 
                                                                 ? Color.blue 
                                                                 : Color.clear,
                                                             lineWidth: 2
                                                         )
-                                                )
-                                            }
-                                            .buttonStyle(.plain)
+                                            )
                                         }
-                                    }
+                                            .buttonStyle(.plain)
+                                }
+                            }
                                     .padding(.horizontal)
-                                } else {
+                        } else {
                                     Text("No options available")
                                         .font(.system(size: 14))
                                         .foregroundColor(.secondary)
                                         .padding(.horizontal)
                                 }
-                            }
+                        }
                         } else if currentQuestion.inputType == "textarea" || currentQuestion.fieldType == "textarea" {
                             // Text Area
                             VStack(alignment: .leading, spacing: 8) {
@@ -308,9 +308,9 @@ struct QuestionAnswerView: View {
             if question.required && (answers[question.id]?.isEmpty ?? true) {
                 errorMessage = "Please answer all required questions"
                 return
-            }
         }
-        
+    }
+    
         isSubmitting = true
         errorMessage = nil
         

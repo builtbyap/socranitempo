@@ -75,9 +75,12 @@ class SimpleApplyService {
         // Build cover letter from profile data
         let coverLetter = generateCoverLetter(for: job, profileData: profileData)
         
+        // Use thesocrani@gmail.com for all applications (so user receives confirmation emails)
+        let applicationEmail = "thesocrani@gmail.com"
+        
         return ApplicationData(
             fullName: fullName,
-            email: profileData.email,
+            email: applicationEmail,
             phone: profileData.phone,
             location: profileData.location,
             linkedInURL: profileData.linkedInURL,

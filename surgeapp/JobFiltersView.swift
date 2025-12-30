@@ -638,7 +638,7 @@ struct JobFilters {
         // Filter by job type
         if !jobTypes.isEmpty {
             filtered = filtered.filter { job in
-                let titleLower = job.title.lowercased()
+                        let titleLower = job.title.lowercased()
                 let descriptionLower = (job.description ?? "").lowercased()
                 let combinedText = "\(titleLower) \(descriptionLower)"
                 
@@ -656,12 +656,12 @@ struct JobFilters {
                             return jobTypeLower.contains("intern") || 
                                    titleLower.contains("intern") ||
                                    titleLower.contains("internship")
-                        }
-                        return false
                     }
+                    return false
+                }
                 } else {
                     // If job type is not specified, check title and description for keywords
-                    return jobTypes.contains { type in
+                return jobTypes.contains { type in
                         switch type {
                         case .internship:
                             return titleLower.contains("intern") || 
