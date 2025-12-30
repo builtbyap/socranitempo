@@ -21,13 +21,25 @@ struct FeedView: View {
     @State private var filters = JobFilters()
     @State private var showingFilters = false
     @State private var allJobPosts: [JobPost] = [] // Store all jobs before filtering
+    @State private var appliedJobIds: Set<String> = [] // Track applied job IDs
+    @State private var passedJobIds: Set<String> = [] // Track passed/rejected job IDs
+    @State private var currentJobIndex: Int = 0 // Track current job in swipeable view
     
-    // Computed property for filtered jobs
+    // Computed property for filtered jobs (excludes applied and passed jobs)
     private var filteredJobPosts: [JobPost] {
-        if filters.hasActiveFilters {
-            return filters.apply(to: allJobPosts)
+        var jobs = allJobPosts
+        
+        // Filter out jobs that have been applied to or passed on
+        jobs = jobs.filter { job in
+            !appliedJobIds.contains(job.id) && !passedJobIds.contains(job.id)
         }
-        return allJobPosts
+        
+        // Apply user filters if active
+        if filters.hasActiveFilters {
+            jobs = filters.apply(to: jobs)
+        }
+        
+        return jobs
     }
     
     var body: some View {
@@ -64,47 +76,51 @@ struct FeedView: View {
                     }
                     Spacer()
                 } else {
-                    ScrollView {
-                        LazyVStack(spacing: 20) {
-                            if selectedTab == 0 {
-                                // Jobs Feed
-                                if filteredJobPosts.isEmpty {
-                                    VStack(spacing: 16) {
-                                        Image(systemName: "briefcase.fill")
-                                            .font(.system(size: 60))
-                                            .foregroundColor(.secondary)
-                                        Text("No jobs in feed")
-                                            .font(.headline)
-                                            .foregroundColor(.secondary)
-                                        Text("Job posts will appear here")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    .padding(.top, 100)
-                                } else {
-                                    ForEach(filteredJobPosts) { post in
-                                        JobPostCard(
-                                            post: post,
-                                            isSaved: false,
-                                            onToggleSave: {},
-                                            onSimpleApply: {
-                                                // Check if job has URL for auto-apply
-                                                if let jobURL = post.url, !jobURL.isEmpty {
-                                                    // Fully automated application using Playwright (like sorce.jobs)
-                                                    showingAutoApply = post
-                                                } else {
-                                                    // No URL, show review screen instead
-                                                    let profileData = SimpleApplyService.shared.getUserProfileData()
-                                                    let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
-                                                    applicationData = appData
-                                                    showingSimpleApply = post
+                    if selectedTab == 0 {
+                        // Jobs Feed - Swipeable single card view (like sorce.jobs)
+                        if filteredJobPosts.isEmpty {
+                            VStack(spacing: 16) {
+                                Image(systemName: "briefcase.fill")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(.secondary)
+                                Text("No jobs in feed")
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+                                Text("Job posts will appear here")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.top, 100)
+                        } else {
+                            GeometryReader { geometry in
+                                ZStack {
+                                    // Show up to 3 cards stacked (top card visible, others behind)
+                                    ForEach(Array(filteredJobPosts.enumerated()), id: \.element.id) { index, post in
+                                        if index >= currentJobIndex && index < currentJobIndex + 3 {
+                                            SwipeableJobCardView(
+                                                post: post,
+                                                onApply: {
+                                                    handleApply(to: post)
+                                                },
+                                                onPass: {
+                                                    handlePass()
                                                 }
-                                            }
-                                        )
+                                            )
+                                            .zIndex(Double(filteredJobPosts.count - index))
+                                            .offset(y: CGFloat(index - currentJobIndex) * 8)
+                                            .scaleEffect(1.0 - CGFloat(index - currentJobIndex) * 0.03)
+                                            .opacity(index == currentJobIndex ? 1.0 : 0.95)
+                                        }
                                     }
                                 }
-                            } else if selectedTab == 1 {
-                                // LinkedIn Feed
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 20)
+                    } else if selectedTab == 1 {
+                        // LinkedIn Feed
+                        ScrollView {
+                            LazyVStack(spacing: 20) {
                                 if linkedInProfiles.isEmpty {
                                     VStack(spacing: 16) {
                                         Image(systemName: "person.2.fill")
@@ -123,8 +139,14 @@ struct FeedView: View {
                                         LinkedInProfileCard(profile: profile, isSaved: false, onToggleSave: {})
                                     }
                                 }
-                            } else {
-                                // Emails Feed
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                        }
+                    } else {
+                        // Emails Feed
+                        ScrollView {
+                            LazyVStack(spacing: 20) {
                                 if emailContacts.isEmpty {
                                     VStack(spacing: 16) {
                                         Image(systemName: "envelope.fill")
@@ -144,9 +166,9 @@ struct FeedView: View {
                                     }
                                 }
                             }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
                     }
                 }
             }
@@ -207,6 +229,99 @@ struct FeedView: View {
                 // Use Playwright-based fully automated application (like sorce.jobs)
                 AutoApplyProgressView(job: job)
             }
+            .onAppear {
+                Task {
+                    await loadPassedJobs()
+                    await fetchAppliedJobs()
+                    await fetchData()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ApplicationStatusUpdated"))) { _ in
+                // Refresh applied jobs when application status changes
+                Task {
+                    await fetchAppliedJobs()
+                }
+            }
+        }
+    }
+    
+    // MARK: - Fetch Applied Jobs
+    private func fetchAppliedJobs() async {
+        do {
+            let applications = try await SupabaseService.shared.fetchApplications()
+            let appliedIds = Set(applications.map { $0.jobPostId })
+            await MainActor.run {
+                self.appliedJobIds = appliedIds
+                print("📋 Loaded \(appliedIds.count) applied job IDs")
+            }
+        } catch {
+            print("⚠️ Failed to fetch applied jobs: \(error.localizedDescription)")
+            // Don't block the UI if this fails
+        }
+    }
+    
+    // MARK: - Handle Apply
+    private func handleApply(to post: JobPost) {
+        // Check if job has URL for auto-apply
+        if let jobURL = post.url, !jobURL.isEmpty {
+            // Fully automated application using Playwright (like sorce.jobs)
+            showingAutoApply = post
+        } else {
+            // No URL, show review screen instead
+            let profileData = SimpleApplyService.shared.getUserProfileData()
+            let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
+            applicationData = appData
+            showingSimpleApply = post
+        }
+        
+        // Move to next job after applying
+        moveToNextJob()
+    }
+    
+    // MARK: - Handle Pass
+    private func handlePass() {
+        // Mark current job as passed/rejected
+        if currentJobIndex < filteredJobPosts.count {
+            let currentJob = filteredJobPosts[currentJobIndex]
+            markJobAsPassed(currentJob.id)
+        }
+        
+        // Move to next job
+        moveToNextJob()
+    }
+    
+    // MARK: - Move to Next Job
+    private func moveToNextJob() {
+        withAnimation(.spring()) {
+            if currentJobIndex < filteredJobPosts.count - 1 {
+                currentJobIndex += 1
+            } else {
+                // Reached end, could refresh or show message
+                print("📋 Reached end of job feed")
+            }
+        }
+    }
+    
+    // MARK: - Mark Job as Passed
+    private func markJobAsPassed(_ jobId: String) {
+        passedJobIds.insert(jobId)
+        savePassedJobs()
+        print("📋 Marked job \(jobId) as passed - will not show again")
+    }
+    
+    // MARK: - Load Passed Jobs
+    private func loadPassedJobs() {
+        if let data = UserDefaults.standard.data(forKey: "passed_job_ids"),
+           let ids = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            passedJobIds = ids
+            print("📋 Loaded \(ids.count) passed job IDs")
+        }
+    }
+    
+    // MARK: - Save Passed Jobs
+    private func savePassedJobs() {
+        if let data = try? JSONEncoder().encode(passedJobIds) {
+            UserDefaults.standard.set(data, forKey: "passed_job_ids")
         }
     }
     
@@ -325,6 +440,10 @@ struct FeedView: View {
                     
                     self.allJobPosts = uniquePosts
                     self.jobPosts = uniquePosts // Keep for compatibility
+                    // Reset to first job when new jobs are loaded
+                    if self.currentJobIndex >= uniquePosts.count {
+                        self.currentJobIndex = 0
+                    }
                     self.loading = false
                     
                     print("✅ Updated UI with \(uniquePosts.count) jobs")
