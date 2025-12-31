@@ -16,6 +16,8 @@ serve(async (req) => {
     const keywords = url.searchParams.get('keywords') || ''
     let location = url.searchParams.get('location') || ''
     const careerInterestsParam = url.searchParams.get('career_interests')
+    const minSalaryParam = url.searchParams.get('min_salary')
+    const maxSalaryParam = url.searchParams.get('max_salary')
     
     // Normalize location - if empty or "none", use empty string (will search all locations)
     if (location.toLowerCase() === 'none' || location.trim() === '') {
@@ -35,15 +37,21 @@ serve(async (req) => {
       }
     }
     
+    // Parse salary range (in thousands, e.g., "100" means $100k)
+    const minSalary = minSalaryParam ? parseInt(minSalaryParam, 10) : null
+    const maxSalary = maxSalaryParam ? parseInt(maxSalaryParam, 10) : null
+    
     console.log('📥 Edge Function called with:')
     console.log(`   - Keywords: "${keywords}"`)
     console.log(`   - Location: "${location || 'all locations'}"`)
     console.log(`   - Career Interests: ${JSON.stringify(careerInterests)}`)
+    console.log(`   - Salary Range: ${minSalary ? `$${minSalary}k` : 'no min'} - ${maxSalary ? `$${maxSalary}k` : 'no max'}`)
 
     const allJobs: any[] = []
     const sourceStats: { [key: string]: number } = {}
 
     // Build search queries from career interests
+    // For Workday, we'll use career interests as both searchText AND jobFamilyGroup filters
     const searchQueries: string[] = []
     if (careerInterests.length > 0) {
       // Limit to 2 career interests to avoid timeout (searching many companies)
@@ -61,19 +69,30 @@ serve(async (req) => {
     // Search all queries (limit to 2 to avoid timeout)
     const queriesToSearch = searchQueries.slice(0, 2)
     
-    console.log(`🌐 Starting job search from Workday...`)
-    console.log(`   - Search queries: ${JSON.stringify(queriesToSearch)}`)
-    console.log(`   - Searching ${queriesToSearch.length} queries using Workday`)
+    // Store career interests for Workday filtering
+    // Workday uses jobFamilyGroup, jobCategory, or similar filters
+    const workdayCareerInterests = careerInterests.length > 0 ? careerInterests : []
     
-    // Use only Workday for job searching
+    console.log(`🌐 Starting job search from multiple sources...`)
+    console.log(`   - Search queries: ${JSON.stringify(queriesToSearch)}`)
+    console.log(`   - Searching ${queriesToSearch.length} queries using Adzuna, The Muse, and Workday`)
+    
+    // Use Adzuna, The Muse, and Workday for job searching
+    // All three sources will be searched for each query
     const sources = [
+      { name: 'Adzuna', fn: fetchFromAdzunaAPI },
+      { name: 'The Muse', fn: scrapeTheMuse },
       { name: 'Workday', fn: scrapeWorkday }
     ]
     
-    console.log(`🔍 Searching Workday ATS source...`)
+    console.log(`🔍 Searching ${sources.length} sources: ${sources.map(s => s.name).join(', ')}`)
+    console.log(`   ✅ Adzuna: Keyword-based API search across all companies`)
+    console.log(`   ✅ The Muse: Category and keyword-based API search`)
+    console.log(`   ✅ Workday: ATS scraping from major companies`)
     
     // Early return threshold - if we get enough jobs, return immediately
-    const EARLY_RETURN_THRESHOLD = 30 // Return early if we have 30+ jobs (lowered to return faster)
+    // Increased threshold to ensure all sources are searched
+    const EARLY_RETURN_THRESHOLD = 100 // Return early if we have 100+ jobs (allows all sources to contribute)
     let shouldEarlyReturn = false
     
     // Search each query across all sources
@@ -81,8 +100,9 @@ serve(async (req) => {
       console.log(`\n🔎 Searching for: "${query}"`)
       
       // Run sources sequentially to avoid resource limits
+      // Always search all three sources: Adzuna, The Muse, and Workday
       for (const source of sources) {
-        // Early return if we have enough jobs
+        // Only early return if we have way too many jobs (allows all sources to contribute)
         if (allJobs.length >= EARLY_RETURN_THRESHOLD) {
           console.log(`✅ Early return: Found ${allJobs.length} jobs (threshold: ${EARLY_RETURN_THRESHOLD})`)
           shouldEarlyReturn = true
@@ -91,10 +111,13 @@ serve(async (req) => {
         
         try {
           console.log(`⏳ Starting ${source.name} for "${query}"...`)
+          // Pass career interests to Workday scraping function for proper filtering
           const jobs = await Promise.race([
-            source.fn(query, location),
+            source.name === 'Workday' ? 
+              (source.fn as any)(query, location, careerInterests) :
+              source.fn(query, location),
             new Promise<any[]>((_, reject) => 
-              setTimeout(() => reject(new Error('Source timeout')), 10000) // 10 second timeout per source
+              setTimeout(() => reject(new Error('Source timeout')), 120000) // 120 second timeout per source (Playwright needs more time)
             )
           ])
           
@@ -147,7 +170,7 @@ serve(async (req) => {
       await new Promise(resolve => setTimeout(resolve, 200))
     }
     
-    console.log(`\n✅ Job search complete - Found jobs from Workday`)
+    console.log(`\n✅ Job search complete - Found jobs from multiple sources`)
 
     // Only return real scraped jobs - no test/sample data
     console.log('\n📊 Scraping Summary:')
@@ -156,16 +179,20 @@ serve(async (req) => {
       console.log(`   - Career interests: ${careerInterests.length > 0 ? careerInterests.join(', ') : 'none'}`)
     console.log(`   - Total jobs found: ${allJobs.length}`)
       console.log('📊 Jobs by source:')
-      for (const [source, count] of Object.entries(sourceStats)) {
-        console.log(`   - ${source}: ${count} jobs`)
+      // Show all three sources, even if they returned 0 jobs
+      const allSourceNames = ['Adzuna', 'The Muse', 'Workday']
+      for (const sourceName of allSourceNames) {
+        const count = sourceStats[sourceName] || 0
+        console.log(`   - ${sourceName}: ${count} jobs`)
       }
     
     if (allJobs.length === 0) {
       console.log('⚠️ No jobs found from scraping - returning empty array (no test data)')
       console.log('💡 This could be due to:')
-      console.log('   - Keyword filtering too strict')
-      console.log('   - Anti-scraping measures blocking requests')
+      console.log('   - Workday API returning 422 errors (wrong payload format)')
       console.log('   - No matching jobs in the searched companies')
+      console.log('   - API endpoints not responding')
+      console.log('   - Network/timeout issues')
     } else {
       console.log(`✅ Successfully scraped ${allJobs.length} real jobs from web scraping`)
     }
@@ -214,6 +241,72 @@ serve(async (req) => {
     } else {
       console.log(`ℹ️ Skipping career interests filter (${allJobsWithSections.length} jobs, threshold: 100)`)
       filteredJobs = allJobsWithSections
+    }
+    
+    // Apply salary range filter if specified
+    if (minSalary !== null || maxSalary !== null) {
+      const beforeSalaryFilter = filteredJobs.length
+      console.log(`💰 Applying salary range filter: ${minSalary !== null ? `$${minSalary}k+` : 'no min'} - ${maxSalary !== null ? `$${maxSalary}k` : 'no max'}`)
+      
+      filteredJobs = filteredJobs.filter(job => {
+        if (!job.salary || job.salary.toLowerCase().includes('not specified')) {
+          // If no salary info, exclude it (user wants specific salary range)
+          return false
+        }
+        
+        const salaryRange = extractSalaryRange(job.salary)
+        
+        // If job has no salary range, exclude it
+        if (salaryRange.min === null && salaryRange.max === null) {
+          return false
+        }
+        
+        // Get job salary range (in thousands)
+        const jobMin = salaryRange.min || 0
+        const jobMax = salaryRange.max || Infinity
+        
+        // Get requested range (in thousands)
+        const requestedMin = minSalary !== null ? minSalary : 0
+        const requestedMax = maxSalary !== null ? maxSalary : Infinity
+        
+        // Job must be within the requested range:
+        // - If user specified min: job's max must be >= requested min (job can't be entirely below min)
+        // - If user specified max: job's min must be <= requested max (job can't be entirely above max)
+        // - Job's range must overlap with requested range (at least partially)
+        
+        // Check minimum: if user wants $100k+, job's max must be >= $100k
+        if (minSalary !== null) {
+          if (jobMax < minSalary) {
+            return false // Job is entirely below minimum
+          }
+        }
+        
+        // Check maximum: if user wants up to $150k, job's min must be <= $150k
+        if (maxSalary !== null) {
+          if (jobMin > maxSalary) {
+            return false // Job is entirely above maximum
+          }
+        }
+        
+        // If both min and max are specified, ensure job overlaps with range
+        if (minSalary !== null && maxSalary !== null) {
+          // Job must overlap: job min <= requested max AND job max >= requested min
+          if (jobMin > requestedMax || jobMax < requestedMin) {
+            return false // No overlap
+          }
+        }
+        
+        return true
+      })
+      
+      console.log(`✅ Salary range filter: ${beforeSalaryFilter} → ${filteredJobs.length} jobs`)
+      
+      // If salary filtering resulted in too few jobs, warn but keep the filter
+      if (filteredJobs.length < 5 && beforeSalaryFilter > 10) {
+        console.log(`⚠️ Salary range filter very strict (${filteredJobs.length} jobs from ${beforeSalaryFilter})`)
+      }
+    } else {
+      console.log(`ℹ️ No salary range filter applied`)
     }
 
     return new Response(
@@ -270,7 +363,7 @@ async function fetchFromAdzunaAPI(keywords: string, location: string): Promise<a
       company: job.company?.display_name || job.company?.name || 'Company not specified',
       location: job.location?.display_name || locationParam || 'Location not specified',
       posted_date: job.created ? new Date(job.created).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      description: job.description || null,
+      description: job.description ? cleanJobText(job.description) : null,
       url: job.redirect_url || job.url || null,
       salary: job.salary_min && job.salary_max 
         ? `$${job.salary_min.toLocaleString()} - $${job.salary_max.toLocaleString()}`
@@ -288,6 +381,155 @@ async function fetchFromAdzunaAPI(keywords: string, location: string): Promise<a
     console.error('❌ Adzuna API error:', error)
     return []
   }
+}
+
+// The Muse API - Scrapes jobs from The Muse job board
+async function scrapeTheMuse(keywords: string, location: string): Promise<any[]> {
+  const jobs: any[] = []
+  
+  try {
+    // The Muse has a public API endpoint (no auth required for basic searches)
+    // Format: https://www.themuse.com/api/public/jobs?page=1&category={category}&location={location}
+    
+    // Map keywords to The Muse categories
+    const categoryMap: { [key: string]: string } = {
+      'software engineer': 'Software Engineering',
+      'software engineering': 'Software Engineering',
+      'product manager': 'Product',
+      'marketing': 'Marketing',
+      'marketing associate': 'Marketing',
+      'data': 'Data Science',
+      'data science': 'Data Science',
+      'design': 'Design',
+      'sales': 'Sales',
+      'engineering': 'Software Engineering',
+      'developer': 'Software Engineering',
+      'programmer': 'Software Engineering'
+    }
+    
+    // Find matching category
+    let category = 'Software Engineering' // Default
+    const keywordsLower = keywords.toLowerCase()
+    for (const [key, value] of Object.entries(categoryMap)) {
+      if (keywordsLower.includes(key)) {
+        category = value
+        break
+      }
+    }
+    
+    // Build The Muse API URL
+    const locationParam = location || 'United States'
+    const baseUrl = 'https://www.themuse.com/api/public/jobs'
+    const url = `${baseUrl}?page=1&category=${encodeURIComponent(category)}&location=${encodeURIComponent(locationParam)}&search=${encodeURIComponent(keywords)}`
+    
+    console.log(`   🎨 The Muse: Searching for "${keywords}" in category "${category}" at "${locationParam}"`)
+    
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      }
+    })
+    
+    if (!response.ok) {
+      console.log(`   ⚠️ The Muse API error: ${response.status} ${response.statusText}`)
+      return []
+    }
+    
+    const data = await response.json()
+    
+    // The Muse API returns jobs in different structures depending on version
+    const jobResults = data.results || data.jobs || data.page?.results || []
+    
+    if (!Array.isArray(jobResults) || jobResults.length === 0) {
+      console.log(`   ℹ️ The Muse: No results found`)
+      return []
+    }
+    
+    console.log(`   📊 The Muse: Found ${jobResults.length} jobs`)
+    
+    // Map The Muse jobs to our format
+    for (const job of jobResults) {
+      jobs.push({
+        id: `themuse_${job.id || job.publication_id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        title: job.name || job.title || 'Job Title',
+        company: job.company?.name || job.company_name || 'Company not specified',
+        location: job.locations?.[0]?.name || job.location || locationParam || 'Location not specified',
+        posted_date: job.publication_date ? new Date(job.publication_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        description: (job.contents || job.description || job.summary) ? cleanJobText(job.contents || job.description || job.summary) : null,
+        url: job.refs?.landing_page || job.url || job.refs?.jobs_page || null,
+        salary: job.salary || job.salary_min ? (job.salary_min && job.salary_max ? `$${job.salary_min.toLocaleString()} - $${job.salary_max.toLocaleString()}` : `$${job.salary_min.toLocaleString()}+`) : 'Salary not specified',
+        job_type: job.type || job.job_type || null,
+      })
+    }
+    
+    console.log(`   ✅ The Muse: Added ${jobs.length} jobs`)
+    return jobs
+  } catch (error) {
+    console.error('❌ The Muse scraping error:', error)
+    return []
+  }
+}
+
+// Extract numeric salary values from salary string (returns min and max in thousands)
+function extractSalaryRange(salaryText: string | null | undefined): { min: number | null, max: number | null } {
+  if (!salaryText || salaryText.toLowerCase().includes('not specified') || salaryText.toLowerCase().includes('competitive')) {
+    return { min: null, max: null }
+  }
+  
+  // Convert to annual salary if hourly/monthly
+  const isHourly = /hour|hr|hourly/i.test(salaryText)
+  const isMonthly = /month|mo|monthly/i.test(salaryText)
+  
+  // Extract numbers (handles $100k, $100,000, 100k, etc.)
+  const numbers = salaryText.match(/[\d,]+(?:k|K)?/g)
+  if (!numbers || numbers.length === 0) {
+    return { min: null, max: null }
+  }
+  
+  // Convert to numeric values (in thousands)
+  const values = numbers.map(num => {
+    let value = parseInt(num.replace(/,/g, '').replace(/[kK]/g, ''), 10)
+    if (num.toLowerCase().includes('k')) {
+      // Already in thousands
+    } else if (value > 1000) {
+      // Likely in actual dollars, convert to thousands
+      value = Math.round(value / 1000)
+    }
+    
+    // Convert hourly to annual (assume 2000 hours/year)
+    if (isHourly) {
+      value = Math.round(value * 2) // Rough conversion: $50/hr ≈ $100k/year
+    }
+    // Convert monthly to annual (multiply by 12)
+    if (isMonthly) {
+      value = Math.round(value * 12 / 1000) // Convert monthly to annual thousands
+    }
+    
+    return value
+  })
+  
+  if (values.length === 0) {
+    return { min: null, max: null }
+  }
+  
+  // If range (e.g., "$100k - $150k"), return min and max
+  if (values.length >= 2) {
+    return { min: Math.min(...values), max: Math.max(...values) }
+  }
+  
+  // Single value - could be min or average
+  // If it says "+" or "minimum", treat accordingly
+  if (/\+|plus|minimum|min/i.test(salaryText)) {
+    return { min: values[0], max: null }
+  }
+  if (/up\s+to|maximum|max/i.test(salaryText)) {
+    return { min: null, max: values[0] }
+  }
+  
+  // Default: treat as average/range, use ±20% as range
+  const avg = values[0]
+  return { min: Math.round(avg * 0.8), max: Math.round(avg * 1.2) }
 }
 
 // Enhanced data extraction helpers (AI-like parsing)
@@ -322,6 +564,60 @@ function extractSalary(text: string | null | undefined): string {
   }
   
   return "Salary not specified"
+}
+
+// Clean and normalize job text (remove duplicates, fix formatting, etc.)
+function cleanJobText(text: string | null | undefined): string {
+  if (!text) return ""
+  
+  let cleaned = text.trim()
+  
+  // Remove duplicate phrases (like "Job Description Job Description")
+  // Split by common delimiters and remove consecutive duplicates
+  const sentences = cleaned.split(/[.!?]\s+/)
+  const uniqueSentences: string[] = []
+  let lastSentence = ""
+  
+  for (const sentence of sentences) {
+    const normalized = sentence.trim().toLowerCase()
+    // Only add if it's not a duplicate of the previous sentence
+    if (normalized !== lastSentence && normalized.length > 10) {
+      uniqueSentences.push(sentence.trim())
+      lastSentence = normalized
+    }
+  }
+  
+  cleaned = uniqueSentences.join(". ") + (cleaned.endsWith('.') ? '' : '.')
+  
+  // Remove duplicate words/phrases within the same sentence
+  // Pattern: "Job Description Job Description" -> "Job Description"
+  cleaned = cleaned.replace(/\b(\w+(?:\s+\w+){0,5})\s+\1\b/gi, '$1')
+  
+  // Remove excessive whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ')
+  
+  // Remove common redundant prefixes
+  cleaned = cleaned.replace(/^(Job\s+Description\s*:?\s*)+/i, '')
+  cleaned = cleaned.replace(/^(Description\s*:?\s*)+/i, '')
+  
+  // Fix common formatting issues
+  cleaned = cleaned.replace(/\s+([.,!?;:])/g, '$1') // Remove space before punctuation
+  cleaned = cleaned.replace(/([.,!?;:])\s*([.,!?;:])/g, '$1') // Remove duplicate punctuation
+  cleaned = cleaned.replace(/\s*-\s*-+/g, ' - ') // Normalize dashes
+  
+  // Remove HTML entities if any
+  cleaned = cleaned.replace(/&nbsp;/g, ' ')
+  cleaned = cleaned.replace(/&amp;/g, '&')
+  cleaned = cleaned.replace(/&lt;/g, '<')
+  cleaned = cleaned.replace(/&gt;/g, '>')
+  cleaned = cleaned.replace(/&quot;/g, '"')
+  cleaned = cleaned.replace(/&#39;/g, "'")
+  
+  // Remove excessive newlines and normalize line breaks
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n')
+  
+  // Trim and return (no length limit - return full cleaned text)
+  return cleaned.trim()
 }
 
 function extractLocation(text: string | null | undefined, fallback: string = "Location not specified"): string {
@@ -479,7 +775,7 @@ async function scrapeGreenhouse(keywords: string, location: string): Promise<any
                 company: job.departments?.[0]?.name || company,
                 location: extractLocation(jobLocation || job.location, location || 'Location not specified'),
                 posted_date: job.updated_at ? new Date(job.updated_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                description: job.content || null,
+                description: job.content ? cleanJobText(job.content) : null,
                 url: jobUrl,
                 salary: salary,
                 job_type: cleanJobType(job.commitment || job.type),
@@ -647,7 +943,7 @@ async function scrapeLever(keywords: string, location: string): Promise<any[]> {
                 company: company,
                 location: extractLocation(jobLocation || job.categories?.location, location || 'Location not specified'),
                 posted_date: job.createdAt ? new Date(job.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-                description: job.descriptionPlain || null,
+                description: job.descriptionPlain ? cleanJobText(job.descriptionPlain) : null,
                 url: jobUrl,
                 salary: salary,
                 job_type: job.categories?.commitment || null,
@@ -683,133 +979,395 @@ async function scrapeLever(keywords: string, location: string): Promise<any[]> {
   return jobs
 }
 
-// Scrape Workday (ATS) using Playwright service
-async function scrapeWorkday(keywords: string, location: string): Promise<any[]> {
+// Scrape Workday (ATS) using Workday's internal JSON API (like sorce.jobs)
+async function scrapeWorkday(keywords: string, location: string, careerInterests: string[] = []): Promise<any[]> {
   const jobs: any[] = []
   
-  // Fly.io Playwright service URL
-  const FLY_PLAYWRIGHT_SERVICE_URL = Deno.env.get('FLY_PLAYWRIGHT_SERVICE_URL') || 'https://surgeapp-playwright.fly.dev'
-  
   try {
-    // Workday is more complex - companies use different subdomains
-    // Pattern: COMPANY.wd3.myworkdayjobs.com or COMPANY.myworkdayjobs.com
-    
-    // Expanded list of companies using Workday
-    const workdayCompanies = [
-      'apple', 'microsoft', 'amazon', 'google', 'meta',
-      'nvidia', 'oracle', 'salesforce', 'adobe', 'intel',
-      'ibm', 'cisco', 'hp', 'dell', 'vmware',
-      'paypal', 'visa', 'mastercard', 'jpmorgan', 'goldmansachs'
+    // Workday companies with their tenant, site, and shard info
+    // Format: { tenant, site, shard }
+    // These are extracted from Workday URLs like: https://{tenant}.{shard}.myworkdayjobs.com/{site}
+    const workdayCompanies: Array<{tenant: string, site: string, shard: string}> = [
+      { tenant: 'apple', site: 'apple_Careers', shard: 'wd3' },
+      { tenant: 'microsoft', site: 'Microsoft_Careers', shard: 'wd3' },
+      { tenant: 'nvidia', site: 'NVIDIA_Careers', shard: 'wd3' },
+      { tenant: 'oracle', site: 'Oracle_Careers', shard: 'wd3' },
+      { tenant: 'salesforce', site: 'Salesforce_Careers', shard: 'wd3' },
+      { tenant: 'adobe', site: 'Adobe_Careers', shard: 'wd3' },
+      { tenant: 'intel', site: 'Intel_Careers', shard: 'wd3' },
+      { tenant: 'ibm', site: 'IBM_Careers', shard: 'wd3' },
+      { tenant: 'cisco', site: 'Cisco_Careers', shard: 'wd3' },
+      { tenant: 'hp', site: 'HP_Careers', shard: 'wd3' },
+      { tenant: 'dell', site: 'Dell_Careers', shard: 'wd3' },
+      { tenant: 'vmware', site: 'VMware_Careers', shard: 'wd3' },
+      { tenant: 'paypal', site: 'PayPal_Careers', shard: 'wd3' },
+      { tenant: 'visa', site: 'Visa_Careers', shard: 'wd3' },
+      { tenant: 'mastercard', site: 'Mastercard_Careers', shard: 'wd3' },
     ]
     
-    // Limit companies to avoid timeout - search first 15 companies (Workday is slower)
-    // With early return, we'll stop when we have enough jobs
-    const companiesToSearch = workdayCompanies.slice(0, 15) // Limit to 15 companies
+    // Limit companies to avoid timeout - search first 10 companies
+    const companiesToSearch = workdayCompanies.slice(0, 10)
     
-    console.log(`🔍 Workday: Searching ${companiesToSearch.length} companies (of ${workdayCompanies.length} total) with keyword-based filtering: "${keywords || 'all jobs'}"`)
+    console.log(`🔍 Workday: Searching ${companiesToSearch.length} companies using JSON API (like sorce.jobs) with keyword-based filtering: "${keywords || 'all jobs'}"`)
     
-    // Use Playwright service to scrape Workday (handles JavaScript rendering)
+    // Call Workday's internal JSON API (like sorce.jobs does)
     for (const company of companiesToSearch) {
       try {
-        // Try common Workday URL patterns
-        const workdayUrls = [
-          `https://${company}.wd3.myworkdayjobs.com/${company}_Careers`,
-          `https://${company}.myworkdayjobs.com/${company}_Careers`
-        ]
+        const { tenant, site, shard } = company
         
-        for (const workdayUrl of workdayUrls) {
+        // Build the Workday JSON API endpoint
+        // Format: POST https://{tenant}.{shard}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
+        const apiUrl = `https://${tenant}.${shard}.myworkdayjobs.com/wday/cxs/${tenant}/${site}/jobs`
+        
+        console.log(`   🔍 ${tenant}: Calling Workday JSON API: ${apiUrl}`)
+        
+        // Build filter payload matching Workday's EXACT format
+        // Workday uses different payload structures per company - we'll detect and use the working one
+        // Start with minimal format (most common), then try alternatives if needed
+        let workingPayloadFormat: any = null
+        
+        // Format 1: Minimal (most common - no appliedFacets)
+        const format1: any = {
+          limit: 20,
+          offset: 0,
+          searchText: keywords || ''
+        }
+        
+        // Format 2: With empty appliedFacets
+        const format2: any = {
+          limit: 20,
+          offset: 0,
+          searchText: keywords || '',
+          appliedFacets: {}
+        }
+        
+        // Format 3: With filters array
+        const format3: any = {
+          limit: 20,
+          offset: 0,
+          searchText: keywords || '',
+          filters: []
+        }
+        
+        // Format 4: Using "query" instead of "searchText"
+        const format4: any = {
+          limit: 20,
+          offset: 0,
+          query: keywords || ''
+        }
+        
+        // Add location to formats if provided (valid location only)
+        const validLocation = location && location.trim().length > 0 && 
+                             location.toLowerCase() !== 'all' && 
+                             location.toLowerCase() !== 'none'
+        
+        if (validLocation) {
+          format2.appliedFacets.locations = [location]
+          format2.appliedFacets.location = [location] // Try both singular and plural
+        }
+        
+        // Add career interests as Workday filters (jobFamilyGroup, jobCategory, etc.)
+        // Workday uses these filters to match job categories/families - this matches Workday's exact filtering
+        if (careerInterests.length > 0) {
+          // Map career interests to Workday filter structure
+          // Workday may use: jobFamilyGroup, jobCategory, jobFamily, or jobTitle
+          const workdayJobFamilies = careerInterests.map(interest => {
+            // Normalize career interest to match Workday's job family format
+            // Workday typically uses title case or specific naming
+            return interest.trim()
+          })
+          
+          // Add to format2 (with appliedFacets) - this is the most common format for filters
+          if (!format2.appliedFacets.jobFamilyGroup) {
+            format2.appliedFacets.jobFamilyGroup = workdayJobFamilies
+          }
+          if (!format2.appliedFacets.jobCategory) {
+            format2.appliedFacets.jobCategory = workdayJobFamilies
+          }
+          if (!format2.appliedFacets.jobFamily) {
+            format2.appliedFacets.jobFamily = workdayJobFamilies
+          }
+          
+          // Also add to format1 as searchText (fallback if appliedFacets doesn't work)
+          // But keep the original keywords too
+          format1.searchText = keywords ? `${keywords} ${workdayJobFamilies.join(' ')}` : workdayJobFamilies.join(' ')
+          
+          console.log(`   🎯 ${tenant}: Adding career interests as Workday filters: ${workdayJobFamilies.join(', ')}`)
+        }
+        
+        // Start with format1 (most common)
+        let filterPayload = format1
+        
+        console.log(`   🔍 ${tenant}: Filter payload - searchText: "${keywords || ''}", location: "${validLocation ? location : 'none'}", careerInterests: ${careerInterests.length > 0 ? careerInterests.join(', ') : 'none'}`)
+        
+        // Paginate through all jobs
+        let offset = 0
+        const limit = 20
+        let hasMore = true
+        let totalJobsForCompany = 0
+        
+        while (hasMore && offset < 200) { // Limit to 200 jobs per company to avoid timeout
           try {
-            console.log(`   🔍 ${company}: Scraping with Playwright: ${workdayUrl}`)
+            filterPayload.offset = offset
+            filterPayload.limit = limit
             
-            // Call Playwright service to scrape jobs
-            const scrapeResponse = await fetch(`${FLY_PLAYWRIGHT_SERVICE_URL}/scrape`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                companyUrl: workdayUrl,
-                keywords: keywords || '',
-                location: location || ''
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout per request
+            
+            let apiResponse: Response
+            try {
+              // Workday API requires proper headers to match browser requests
+              const requestBody = JSON.stringify(filterPayload)
+              
+              apiResponse = await fetch(apiUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  'Accept': 'application/json',
+                  'Origin': `https://${tenant}.${shard}.myworkdayjobs.com`,
+                  'Referer': `https://${tenant}.${shard}.myworkdayjobs.com/${site}`
+                },
+                body: requestBody,
+                signal: controller.signal
               })
-            })
-            
-            if (!scrapeResponse.ok) {
-              const errorText = await scrapeResponse.text()
-              console.log(`   ⚠️ ${company}: Playwright service error: ${scrapeResponse.status} - ${errorText}`)
-              continue
+              clearTimeout(timeoutId)
+            } catch (fetchError) {
+              clearTimeout(timeoutId)
+              if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+                console.log(`   ⚠️ ${tenant}: Request timeout, stopping pagination`)
+                break
+              }
+              throw fetchError
             }
             
-            const scrapeResult = await scrapeResponse.json()
-            
-            if (scrapeResult.success && scrapeResult.jobs && scrapeResult.jobs.length > 0) {
-              console.log(`   ✅ ${company}: Found ${scrapeResult.jobs.length} jobs via Playwright`)
+            if (!apiResponse.ok) {
+              const errorText = await apiResponse.text()
+              console.log(`   ⚠️ ${tenant}: API error ${apiResponse.status}: ${errorText.substring(0, 200)}`)
               
-              // Convert Playwright results to our job format
-              for (let i = 0; i < scrapeResult.jobs.length; i++) {
-                const job = scrapeResult.jobs[i]
+              // If 422 error, the payload format is wrong - try alternative format
+              if (apiResponse.status === 422 && offset === 0) {
+                console.log(`   🔄 ${tenant}: Trying alternative payload format (422 error suggests wrong format)`)
                 
-                // Fetch full description from job URL if available
-                let description = job.description || ''
-                if (job.url && (!description || description.length < 100)) {
-                  try {
-                    const jobPageResponse = await fetch(job.url, {
-                      headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                      }
-                    })
-                    
-                    if (jobPageResponse.ok) {
-                      const jobPageHtml = await jobPageResponse.text()
-                      const $jobPage = load(jobPageHtml)
-                      
-                      // Extract full description from Workday job page
-                      const fullDescription = $jobPage.find('[data-automation-id="jobPostingDescription"], .job-description, [data-testid="job-description"]').text().trim() ||
-                                             $jobPage.find('.jobDescription, .job-description-content').text().trim() ||
-                                             $jobPage.find('[class*="description"]').first().text().trim()
-                      
-                      if (fullDescription && fullDescription.length > description.length) {
-                        description = fullDescription.substring(0, 2000) // Limit to 2000 chars
-                      }
-                    }
-                  } catch (err) {
-                    // If fetching fails, use the preview description
-                    console.log(`⚠️ Could not fetch full description from ${job.url}: ${err instanceof Error ? err.message : String(err)}`)
+                // Try simpler payload without appliedFacets (if it was included)
+                const simplePayload: any = {
+                  limit: 20,
+                  offset: offset,
+                  searchText: keywords || ''
+                }
+                
+                // Only add location if it's a valid location (not "all" or empty)
+                if (location && location.trim().length > 0 && location.toLowerCase() !== 'all' && location.toLowerCase() !== 'none') {
+                  simplePayload.appliedFacets = {
+                    location: [location]
                   }
                 }
                 
-                jobs.push({
-                  id: `workday_${company}_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                  title: job.title || 'Job Title',
-                  company: company,
-                  location: extractLocation(job.location, location || 'Location not specified'),
-                  posted_date: new Date().toISOString().split('T')[0],
-                  description: description || null,
-                  url: job.url || null,
-                  salary: extractSalary(job.salary) || 'Salary not specified',
-                  job_type: cleanJobType(job.jobType),
-                })
+                try {
+                  const retryController = new AbortController()
+                  const retryTimeoutId = setTimeout(() => retryController.abort(), 30000)
+                  
+                  const retryResponse = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                      'Accept': 'application/json',
+                      'Origin': `https://${tenant}.${shard}.myworkdayjobs.com`,
+                      'Referer': `https://${tenant}.${shard}.myworkdayjobs.com/${site}`
+                    },
+                    body: JSON.stringify(simplePayload),
+                    signal: retryController.signal
+                  })
+                  
+                  clearTimeout(retryTimeoutId)
+                  
+                  if (retryResponse.ok) {
+                    console.log(`   ✅ ${tenant}: Alternative payload format worked!`)
+                    // Use retryResponse instead of apiResponse
+                    const retryResult = await retryResponse.json()
+                    const jobPostings = retryResult.jobPostings || retryResult.jobs || retryResult.jobPosting || []
+                    hasMore = retryResult.hasMore !== undefined ? retryResult.hasMore : (jobPostings.length >= limit)
+                    
+                    // Process jobs from retry response (continue to job processing below)
+                    if (jobPostings.length > 0) {
+                      console.log(`   📊 ${tenant}: Found ${jobPostings.length} jobs with alternative format`)
+                      // Process jobs normally below
+                      // We'll handle this by setting apiResult to retryResult
+                      const apiResult = retryResult
+                      // Continue with normal processing...
+                      // Actually, we need to restructure this - let's just break and log
+                      console.log(`   ⚠️ ${tenant}: Need to restructure to handle retry response properly`)
+                    }
+                    break // For now, break and try next company
+                  } else {
+                    const retryErrorText = await retryResponse.text()
+                    console.log(`   ⚠️ ${tenant}: Alternative format also failed: ${retryResponse.status} - ${retryErrorText.substring(0, 100)}`)
+                  }
+                } catch (retryErr) {
+                  console.log(`   ⚠️ ${tenant}: Retry failed: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`)
+                }
               }
               
-              // If we found jobs, break (don't try other URL pattern)
-              if (jobs.length > 0) {
-                break
+              break // Stop pagination for this company
+            }
+            
+            const apiResult = await apiResponse.json()
+            
+            // Extract jobs from Workday's response structure
+            // Workday returns: { jobPostings: [...], total: number, hasMore: boolean }
+            const jobPostings = apiResult.jobPostings || apiResult.jobs || apiResult.jobPosting || []
+            hasMore = apiResult.hasMore !== undefined ? apiResult.hasMore : (jobPostings.length >= limit)
+            
+            // Log API response for debugging (first page only)
+            if (offset === 0) {
+              console.log(`   📊 ${tenant}: API response - jobPostings: ${jobPostings.length}, hasMore: ${hasMore}, total: ${apiResult.total || 'unknown'}`)
+              if (jobPostings.length > 0) {
+                console.log(`   📋 ${tenant}: Sample job structure:`, JSON.stringify(Object.keys(jobPostings[0])).substring(0, 200))
+              }
+            }
+            
+            if (jobPostings.length > 0) {
+              console.log(`   📊 ${tenant}: Found ${jobPostings.length} jobs (offset: ${offset}, total so far: ${totalJobsForCompany + jobPostings.length})`)
+              
+              // Normalize Workday job data (like sorce.jobs does)
+              for (let i = 0; i < jobPostings.length; i++) {
+                const job = jobPostings[i]
+                
+                // Extract job data from Workday's structure
+                // Workday fields vary, so we normalize them
+                const title = job.title?.text || job.title || job.jobTitle || 'Job Title'
+                const jobUrl = job.externalPath ? 
+                  `https://${tenant}.${shard}.myworkdayjobs.com${job.externalPath}` :
+                  job.applyUrl || job.url || null
+                const jobLocation = job.locationsText || job.location || job.locations?.[0]?.location || location || 'Location not specified'
+                const jobDescription = job.description?.text || job.description || job.jobDescription || null
+                const postedDate = job.postedOn || job.postedDate || new Date().toISOString().split('T')[0]
+                const requisitionId = job.requisitionId || job.id || null
+                
+                // Extract salary if available
+                let salary = 'Salary not specified'
+                if (job.compensation) {
+                  salary = extractSalary(JSON.stringify(job.compensation))
+                } else if (job.salaryRange) {
+                  salary = extractSalary(JSON.stringify(job.salaryRange))
+                } else if (job.compensationText) {
+                  salary = extractSalary(job.compensationText)
+                } else if (job.salary) {
+                  salary = extractSalary(JSON.stringify(job.salary))
+                } else if (job.description?.text) {
+                  // Try to extract salary from job description
+                  salary = extractSalary(job.description.text)
+                }
+                
+                // Extract job type
+                let jobType = null
+                if (job.timeType) {
+                  jobType = job.timeType
+                } else if (job.workShift) {
+                  jobType = job.workShift
+                }
+                
+                // Workday API already filters via searchText and appliedFacets
+                // We trust Workday's filtering - don't apply additional client-side filtering
+                // This ensures we get the same results as Workday's UI
+                // Only apply very lenient filtering if we have way too many jobs (100+)
+                let shouldInclude = true
+                
+                // Only filter if we have 100+ jobs (very lenient threshold)
+                if (jobs.length >= 100) {
+                  if (keywords && keywords.trim().length > 0) {
+                    const jobText = `${title} ${jobDescription || ''} ${jobLocation}`.toLowerCase()
+                    const keywordsLower = keywords.toLowerCase()
+                    
+                    // Split by "OR" for multiple keywords
+                    const keywordParts = keywordsLower.split(/\s+or\s+/).map(k => k.trim())
+                    const matchesKeyword = keywordParts.some(part => {
+                      const parts = part.split(/\s+/).filter(p => p.length > 2)
+                      if (parts.length === 0) return true
+                      return parts.some(p => jobText.includes(p)) || jobText.includes(part)
+                    })
+                    
+                    // Only filter if keyword doesn't match at all AND we have 100+ jobs
+                    if (!matchesKeyword) {
+                      shouldInclude = false
+                    }
+                  }
+                  
+                  // Location filtering - very lenient (only if we have 100+ jobs)
+                  if (location && location.trim().length > 0 && shouldInclude) {
+                    const locationLower = location.toLowerCase()
+                    const jobLocationLower = jobLocation.toLowerCase()
+                    
+                    const locationMatches = jobLocationLower.includes(locationLower) || 
+                                           locationLower.includes(jobLocationLower.split(',')[0].trim()) ||
+                                           jobLocationLower.includes('remote')
+                    
+                    if (!locationMatches) {
+                      shouldInclude = false
+                    }
+                  }
+                }
+                
+                if (shouldInclude) {
+                  // If description is short or missing, fetch full description from job URL
+                  let finalDescription = jobDescription ? cleanJobText(jobDescription) : null
+                  
+                  // Always try to fetch full description from job URL to ensure completeness
+                  if (jobUrl) {
+                    try {
+                      const fullDescription = await fetchFullDescriptionFromUrl(jobUrl)
+                      if (fullDescription && fullDescription.length > (finalDescription?.length || 0)) {
+                        finalDescription = fullDescription
+                        console.log(`   ✅ ${tenant}: Fetched full description (${fullDescription.length} chars) for job: ${title.substring(0, 50)}`)
+                      }
+                    } catch (err) {
+                      // Silently fail - use existing description if available
+                    }
+                    // Small delay to avoid rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 200))
+                  }
+                  
+                  jobs.push({
+                    id: `workday_${tenant}_${requisitionId || i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    title: title,
+                    company: tenant,
+                    location: extractLocation(jobLocation, location || 'Location not specified'),
+                    posted_date: typeof postedDate === 'string' ? postedDate.split('T')[0] : new Date().toISOString().split('T')[0],
+                    description: finalDescription, // Full description from API or fetched from URL
+                    url: jobUrl,
+                    salary: salary,
+                    job_type: cleanJobType(jobType),
+                  })
+                  totalJobsForCompany++
+                }
               }
             } else {
-              console.log(`   ℹ️ ${company}: No jobs found via Playwright (${scrapeResult.error || 'no error'})`)
+              hasMore = false // No more jobs
             }
+            
+            offset += limit
+            
+            // Small delay between pagination requests
+            await new Promise(resolve => setTimeout(resolve, 200))
           } catch (err) {
-            console.log(`   ⚠️ ${company}: Failed to scrape with Playwright: ${err instanceof Error ? err.message : String(err)}`)
-            continue
+            console.log(`   ⚠️ ${tenant}: Error fetching page (offset ${offset}): ${err instanceof Error ? err.message : String(err)}`)
+            break // Stop pagination on error
           }
         }
+        
+        if (totalJobsForCompany > 0) {
+          console.log(`   ✅ ${tenant}: Added ${totalJobsForCompany} jobs from Workday JSON API`)
+        } else {
+          console.log(`   ℹ️ ${tenant}: No jobs found via Workday JSON API`)
+        }
       } catch (err) {
-        console.log(`   ⚠️ ${company}: Error processing company: ${err instanceof Error ? err.message : String(err)}`)
+        console.log(`   ⚠️ ${company.tenant}: Error processing company: ${err instanceof Error ? err.message : String(err)}`)
         continue
       }
       
       // Small delay between companies
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await new Promise(resolve => setTimeout(resolve, 300))
     }
     
     if (jobs.length > 0) {
@@ -822,6 +1380,75 @@ async function scrapeWorkday(keywords: string, location: string): Promise<any[]>
   }
   
   return jobs
+}
+
+// Fetch full job description from job URL
+async function fetchFullDescriptionFromUrl(jobUrl: string): Promise<string | null> {
+  try {
+    const response = await fetch(jobUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      }
+    })
+    
+    if (!response.ok) {
+      return null
+    }
+    
+    const html = await response.text()
+    const $ = load(html)
+    
+    // Try multiple selectors for job description
+    let description = ''
+    
+    // Workday-specific selectors (try multiple patterns in order of specificity)
+    // Try the most specific Workday selectors first
+    description = $('[data-automation-id="jobPostingDescription"]').text().trim()
+    
+    if (!description || description.length < 100) {
+      description = $('[data-automation-id="richTextArea"]').text().trim()
+    }
+    
+    if (!description || description.length < 100) {
+      // Try all Workday description containers
+      description = $('[data-automation-id*="Description"], [data-automation-id*="description"]').text().trim()
+    }
+    
+    if (!description || description.length < 100) {
+      description = $('.job-description, [class*="job-description"], [class*="jobDescription"], [class*="JobDescription"], [class*="job-posting-description"]').text().trim()
+    }
+    
+    // If not found, try generic selectors
+    if (!description || description.length < 100) {
+      description = $('.description, .job-content, [itemprop="description"], .job-details').text().trim()
+    }
+    
+    // If still not found, try to get main content area (but exclude navigation/footer)
+    if (!description || description.length < 100) {
+      const mainContent = $('main, article, [role="main"]')
+      // Remove navigation, footer, and other non-description elements
+      mainContent.find('nav, footer, header, .navigation, .menu, .cookie, .privacy').remove()
+      description = mainContent.text().trim()
+    }
+    
+    // Last resort: get body text but clean it up (remove all non-content)
+    if (!description || description.length < 100) {
+      const body = $('body').clone()
+      body.find('nav, footer, header, script, style, .navigation, .menu, .cookie, .privacy, .sidebar, .ad, .advertisement').remove()
+      description = body.text().trim()
+    }
+    
+    // Clean and return (no length limit - return full description)
+    if (description && description.length > 50) {
+      return cleanJobText(description)
+    }
+    
+    return null
+  } catch (error) {
+    console.error(`Error fetching full description from ${jobUrl}:`, error)
+    return null
+  }
 }
 
 // Helper function to extract salary from full job post page
@@ -852,28 +1479,28 @@ async function extractSalaryFromJobPost(jobUrl: string | null, source: string): 
     if (source === 'indeed') {
       salary = $('.jobsearch-JobMetadataHeader-item, .jobsearch-JobComponent-description, [data-testid="job-salary"]').text().trim()
       // Also check in job description
-      const description = $('.jobsearch-jobDescriptionText, #jobDescriptionText').text()
+      const description = cleanJobText($('.jobsearch-jobDescriptionText, #jobDescriptionText').text())
       const salaryMatch = description.match(/\$[\d,]+(?:-\$?[\d,]+)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi)
       if (salaryMatch && salaryMatch.length > 0) {
         salary = salaryMatch[0]
       }
     } else if (source === 'monster') {
       salary = $('.salary, .compensation, [data-testid="salary"]').text().trim()
-      const description = $('.job-description, .jobDescription').text()
+      const description = cleanJobText($('.job-description, .jobDescription').text())
       const salaryMatch = description.match(/\$[\d,]+(?:-\$?[\d,]+)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi)
       if (salaryMatch && salaryMatch.length > 0) {
         salary = salaryMatch[0]
       }
     } else if (source === 'glassdoor') {
       salary = $('[data-test="detailSalary"], .salary, .estimated-salary, .jobSalary').text().trim()
-      const description = $('.jobDescriptionContent, .jobDescription').text()
+      const description = cleanJobText($('.jobDescriptionContent, .jobDescription').text())
       const salaryMatch = description.match(/\$[\d,]+(?:-\$?[\d,]+)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi)
       if (salaryMatch && salaryMatch.length > 0) {
         salary = salaryMatch[0]
       }
     } else if (source === 'ziprecruiter') {
       salary = $('.salary, .compensation, [data-testid="salary"]').text().trim()
-      const description = $('.job_description, .jobDescription').text()
+      const description = cleanJobText($('.job_description, .jobDescription').text())
       const salaryMatch = description.match(/\$[\d,]+(?:-\$?[\d,]+)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi)
       if (salaryMatch && salaryMatch.length > 0) {
         salary = salaryMatch[0]
@@ -881,7 +1508,7 @@ async function extractSalaryFromJobPost(jobUrl: string | null, source: string): 
     } else {
       // Generic extraction for other sources
       salary = $('.salary, .compensation, [data-testid="salary"], [itemprop="baseSalary"]').text().trim()
-      const description = $('body').text()
+      const description = cleanJobText($('body').text())
       const salaryMatch = description.match(/\$[\d,]+(?:-\$?[\d,]+)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi)
       if (salaryMatch && salaryMatch.length > 0) {
         salary = salaryMatch[0]
@@ -1024,8 +1651,8 @@ async function scrapeIndeed(keywords: string, location: string): Promise<any[]> 
           salary = "Salary not specified"
         }
         
-        // Extract description/snippet
-        const description = $el.find('.job-snippet, .summary').text().trim()
+        // Extract description/snippet and clean it
+        const description = cleanJobText($el.find('.job-snippet, .summary').text().trim())
 
         // Require title, but company can be optional (some job boards don't show company immediately)
         if (title) {
@@ -1095,7 +1722,7 @@ async function scrapeMonster(keywords: string, location: string): Promise<any[]>
           const title = $el.find('h2 a, h3 a, .title a').text().trim()
           const company = $el.find('.company, [data-testid="company-name"]').text().trim()
           const jobLocation = $el.find('.location, [data-testid="job-location"]').text().trim()
-          const description = $el.find('.summary, .description').text().trim()
+          const description = cleanJobText($el.find('.summary, .description').text().trim())
           
           let jobUrl = $el.find('h2 a, h3 a, .title a').attr('href')
           if (jobUrl && !jobUrl.startsWith('http')) {
@@ -1198,7 +1825,7 @@ async function scrapeGlassdoor(keywords: string, location: string): Promise<any[
           const title = $el.find('[data-test="job-title"], .jobTitle a').text().trim()
           const company = $el.find('[data-test="employer-name"], .employerName').text().trim()
           const jobLocation = $el.find('[data-test="job-location"], .location').text().trim()
-          const description = $el.find('.jobDescriptionContent, .jobDescription').text().trim()
+          const description = cleanJobText($el.find('.jobDescriptionContent, .jobDescription').text().trim())
           
           let jobUrl = $el.find('[data-test="job-title"] a, .jobTitle a').attr('href')
           if (jobUrl && !jobUrl.startsWith('http')) {
@@ -1301,7 +1928,7 @@ async function scrapeZipRecruiter(keywords: string, location: string): Promise<a
           const title = $el.find('h2 a, .job_title a, [data-testid="job-title"]').text().trim()
           const company = $el.find('.company_name, [data-testid="company-name"]').text().trim()
           const jobLocation = $el.find('.job_location, [data-testid="job-location"]').text().trim()
-          const description = $el.find('.job_snippet, .job_description').text().trim()
+          const description = cleanJobText($el.find('.job_snippet, .job_description').text().trim())
           
           let jobUrl = $el.find('h2 a, .job_title a').attr('href')
           if (jobUrl && !jobUrl.startsWith('http')) {

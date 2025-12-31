@@ -15,47 +15,75 @@ struct SwipeableJobCardView: View {
     @State private var dragOffset: CGSize = .zero
     @State private var rotation: Double = 0
     
-    private let swipeThreshold: CGFloat = 100
+    private let swipeThreshold: CGFloat = 80 // Lower threshold for easier swiping
     
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 // Card Background - Fill entire available space
+                // Don't constrain height to allow ScrollView to work properly
                 JobPostCard(post: post, isSaved: false, onToggleSave: {})
-                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .frame(width: geometry.size.width)
+                    .frame(maxHeight: geometry.size.height)
                     .offset(dragOffset)
                     .rotationEffect(.degrees(rotation))
                     .opacity(1.0 - min(abs(dragOffset.width) / (geometry.size.width * 0.5), 0.1))
                     .scaleEffect(1.0 - min(abs(dragOffset.width) / (geometry.size.width * 2), 0.05))
                     .gesture(
-                        DragGesture()
+                        DragGesture(minimumDistance: 10)
                             .onChanged { value in
-                                dragOffset = value.translation
-                                // Smoother rotation (sorce.jobs style)
-                                rotation = Double(value.translation.width / 15)
+                                // Determine if this is primarily a horizontal or vertical drag
+                                let horizontalComponent = abs(value.translation.width)
+                                let verticalComponent = abs(value.translation.height)
+                                
+                                // If horizontal movement is greater, treat as swipe
+                                if horizontalComponent > verticalComponent * 1.2 {
+                                    // Smooth, responsive horizontal drag
+                                    dragOffset = value.translation
+                                    // Smoother rotation (sorce.jobs style)
+                                    rotation = Double(value.translation.width / 15)
+                                } else if horizontalComponent > 30 {
+                                    // If user has moved horizontally enough, start tracking
+                                    // This helps with diagonal swipes
+                                    dragOffset = CGSize(width: value.translation.width, height: value.translation.height * 0.3)
+                                    rotation = Double(value.translation.width / 20)
+                                }
                             }
                             .onEnded { value in
-                                if value.translation.width > swipeThreshold {
-                                    // Swipe right - Apply
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                        dragOffset = CGSize(width: geometry.size.width * 2.5, height: 0)
-                                        rotation = 25
-                                    }
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                                        onApply()
-                                    }
-                                } else if value.translation.width < -swipeThreshold {
-                                    // Swipe left - Pass
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                        dragOffset = CGSize(width: -geometry.size.width * 2.5, height: 0)
-                                        rotation = -25
-                                    }
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                                        onPass()
+                                let horizontalComponent = abs(value.translation.width)
+                                let verticalComponent = abs(value.translation.height)
+                                let isHorizontalSwipe = horizontalComponent > verticalComponent * 1.2
+                                
+                                // Calculate velocity for quick swipes
+                                let velocity = value.predictedEndTranslation.width - value.translation.width
+                                let hasHighVelocity = abs(velocity) > 300
+                                
+                                // Adjust threshold based on velocity (faster swipes need less distance)
+                                let effectiveThreshold = hasHighVelocity ? swipeThreshold * 0.6 : swipeThreshold
+                                
+                                if isHorizontalSwipe && horizontalComponent > effectiveThreshold {
+                                    if value.translation.width > 0 {
+                                        // Swipe right - Apply
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                            dragOffset = CGSize(width: geometry.size.width * 2.5, height: 0)
+                                            rotation = 25
+                                        }
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                            onApply()
+                                        }
+                                    } else {
+                                        // Swipe left - Pass
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                            dragOffset = CGSize(width: -geometry.size.width * 2.5, height: 0)
+                                            rotation = -25
+                                        }
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                            onPass()
+                                        }
                                     }
                                 } else {
-                                    // Snap back (sorce.jobs style - smooth spring)
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                    // Snap back (smooth spring animation)
+                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
                                         dragOffset = .zero
                                         rotation = 0
                                     }

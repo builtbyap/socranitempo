@@ -281,7 +281,7 @@ class JobScrapingService {
     // 4. Returns structured JSON data
     //
     // To configure: Update Config.jobScrapingBackendURL in Config.swift with your actual backend endpoint
-    func fetchJobsFromBackend(keywords: String? = nil, location: String? = nil, careerInterests: [String] = []) async throws -> [JobPost] {
+    func fetchJobsFromBackend(keywords: String? = nil, location: String? = nil, careerInterests: [String] = [], minSalary: Int? = nil, maxSalary: Int? = nil) async throws -> [JobPost] {
         // Backend URL is configured in Config.swift
         guard let backendURL = URL(string: Config.jobScrapingBackendURL) else {
             throw JobScrapingError.invalidURL
@@ -303,6 +303,14 @@ class JobScrapingService {
         }
         if let location = location, !location.isEmpty {
             queryItems.append(URLQueryItem(name: "location", value: location))
+        }
+        
+        // Add salary range filters if provided
+        if let minSalary = minSalary {
+            queryItems.append(URLQueryItem(name: "min_salary", value: "\(minSalary)"))
+        }
+        if let maxSalary = maxSalary {
+            queryItems.append(URLQueryItem(name: "max_salary", value: "\(maxSalary)"))
         }
         
         // Also send career interests as a separate parameter for backend filtering

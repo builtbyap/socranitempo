@@ -24,15 +24,16 @@ serve(async (req) => {
     console.log(`📋 Fetching job details from: ${jobUrl}`)
     
     const sections = await extractJobSections(jobUrl)
+    const salary = await extractSalaryFromJobPost(jobUrl)
     
     return new Response(
-      JSON.stringify({ sections: sections || [] }),
+      JSON.stringify({ sections: sections || [], salary: salary || null }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
     console.error('❌ Error fetching job details:', error)
     return new Response(
-      JSON.stringify({ error: error.message, sections: [] }),
+      JSON.stringify({ error: error.message, sections: [], salary: null }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -57,17 +58,20 @@ async function extractJobSections(jobUrl: string): Promise<any[] | null> {
     
     const sections: any[] = []
     
-    // Common section title patterns
+    // Common section title patterns (prioritize qualifications)
     const sectionPatterns = [
+      /qualifications/i,
+      /essential\s+qualifications/i,
+      /preferred\s+qualifications/i,
+      /required\s+qualifications/i,
+      /minimum\s+qualifications/i,
+      /requirements/i,
+      /required\s+skills/i,
+      /what\s+we'?re\s+looking\s+for/i,
       /what\s+you'?ll\s+do/i,
       /what\s+you'?ll\s+work\s+on/i,
       /responsibilities/i,
-      /requirements/i,
-      /qualifications/i,
-      /what\s+we'?re\s+looking\s+for/i,
       /key\s+responsibilities/i,
-      /essential\s+qualifications/i,
-      /preferred\s+qualifications/i,
       /benefits/i,
       /perks/i,
       /about\s+the\s+role/i,
@@ -109,7 +113,7 @@ async function extractJobSections(jobUrl: string): Promise<any[] | null> {
           sections.push({
             id: `section_${i}_${Date.now()}`,
             title: title,
-            content: content.trim().substring(0, 1000) // Limit content length
+            content: content.trim().substring(0, 2000) // Increased limit for qualifications
           })
         }
       }
@@ -128,7 +132,7 @@ async function extractJobSections(jobUrl: string): Promise<any[] | null> {
           sections.push({
             id: `section_${i}_${Date.now()}`,
             title: title.substring(0, 100),
-            content: content.substring(0, 1000)
+            content: content.substring(0, 2000) // Increased limit for qualifications
           })
         }
       })
@@ -137,6 +141,76 @@ async function extractJobSections(jobUrl: string): Promise<any[] | null> {
     return sections.length > 0 ? sections : null
   } catch (error) {
     console.error('Error extracting job sections:', error)
+    return null
+  }
+}
+
+// Extract salary from job post URL
+async function extractSalaryFromJobPost(jobUrl: string): Promise<string | null> {
+  try {
+    const response = await fetch(jobUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      }
+    })
+    
+    if (!response.ok) {
+      return null
+    }
+    
+    const html = await response.text()
+    const $ = load(html)
+    
+    // Try multiple selectors for salary
+    let salary = $('.salary, .compensation, [data-testid="salary"], [itemprop="baseSalary"], .pay-range, .salary-range').text().trim()
+    
+    // If not found in dedicated elements, search in description/body
+    if (!salary) {
+      const bodyText = $('body').text()
+      const salaryPatterns = [
+        // Ranges: $100k - $150k, $100,000 - $150,000
+        /\$[\d,]+(?:k|K)?\s*[-–—]\s*\$?[\d,]+(?:k|K)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi,
+        // Single amounts: $100k, $100,000
+        /\$[\d,]+(?:k|K)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi,
+        // With context: "salary: $100k", "compensation: $100k - $150k"
+        /(?:salary|compensation|pay|wage|base|total|package).*?\$[\d,]+(?:k|K)?(?:\s*[-–—]\s*\$?[\d,]+(?:k|K)?)?/gi,
+        // Annual/monthly/hourly: "$100k annually", "$50/hour"
+        /\$[\d,]+(?:k|K)?\s*(?:annually|yearly|per\s+year|per\s+month|per\s+hour|hourly|monthly)/gi,
+      ]
+      
+      for (const pattern of salaryPatterns) {
+        const matches = bodyText.match(pattern)
+        if (matches && matches.length > 0) {
+          salary = matches[0].trim()
+          // Remove common prefixes
+          salary = salary.replace(/^(?:salary|compensation|pay|wage|base|total|package)[:\s]+/i, '')
+          salary = salary.replace(/\s+/g, ' ')
+          break
+        }
+      }
+    }
+    
+    // Clean up salary text
+    if (salary) {
+      salary = salary.replace(/\s+/g, ' ').trim()
+      // If it's too long, try to extract just the salary range
+      if (salary.length > 100) {
+        const rangeMatch = salary.match(/\$[\d,]+(?:k|K)?(?:\s*[-–—]\s*\$?[\d,]+(?:k|K)?)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi)
+        if (rangeMatch && rangeMatch.length > 0) {
+          salary = rangeMatch[0]
+        }
+      }
+      
+      // Only return if it looks like a valid salary
+      if (salary.length > 3 && salary.length < 100 && /\$/.test(salary)) {
+        return salary
+      }
+    }
+    
+    return null
+  } catch (error) {
+    console.error('Error extracting salary from job post:', error)
     return null
   }
 }

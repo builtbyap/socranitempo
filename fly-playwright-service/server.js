@@ -892,27 +892,58 @@ app.post('/scrape', async (req, res) => {
     }
     
     // Scrape jobs from the page
-    const jobs = await page.evaluate((keywords, location) => {
+    const jobs = await page.evaluate(({ keywords, location }) => {
       const jobList = [];
       
-      // Try multiple selectors for job titles
+      // Try multiple selectors for job titles (expanded list for Workday)
       const jobSelectors = [
         '[data-automation-id="jobTitle"]',
-        '.job-title',
-        '[data-testid="job-title"]',
-        'a[href*="/jobs/"]',
         '[data-automation-id="jobPosting"]',
+        '[data-automation-id="jobPostingTitle"]',
+        'a[data-automation-id="jobTitle"]',
+        'a[href*="/jobs/"]',
+        'a[href*="/job/"]',
+        'a[href*="/careers/"]',
+        '[data-testid="job-title"]',
+        '[data-testid="job-posting"]',
+        '.job-title',
         '.job-posting',
-        '[class*="job"]'
+        '.job-card',
+        '[class*="job"]',
+        '[class*="Job"]',
+        '[class*="posting"]',
+        '[class*="Posting"]',
+        'li[data-automation-id*="job"]',
+        'div[data-automation-id*="job"]'
       ];
       
       let jobElements = [];
+      let foundSelector = null;
       for (const selector of jobSelectors) {
-        const elements = document.querySelectorAll(selector);
-        if (elements.length > 0) {
-          jobElements = Array.from(elements);
-          console.log(`Found ${elements.length} jobs with selector: ${selector}`);
-          break;
+        try {
+          const elements = document.querySelectorAll(selector);
+          if (elements.length > 0) {
+            jobElements = Array.from(elements);
+            foundSelector = selector;
+            console.log(`Found ${elements.length} elements with selector: ${selector}`);
+            break;
+          }
+        } catch (e) {
+          // Invalid selector, continue
+          continue;
+        }
+      }
+      
+      // If no jobs found, log what's on the page for debugging
+      if (jobElements.length === 0) {
+        console.log('No job elements found. Page structure:');
+        console.log('Title:', document.title);
+        console.log('URL:', window.location.href);
+        // Try to find any links that might be jobs
+        const allLinks = document.querySelectorAll('a[href*="job"], a[href*="career"], a[href*="position"]');
+        console.log(`Found ${allLinks.length} potential job links`);
+        if (allLinks.length > 0) {
+          console.log('Sample links:', Array.from(allLinks).slice(0, 5).map(l => ({ text: l.textContent?.trim(), href: l.href })));
         }
       }
       
@@ -958,7 +989,7 @@ app.post('/scrape', async (req, res) => {
           const salaryElement = jobCard?.querySelector('[data-automation-id="compensationText"], .salary, [class*="salary"], [class*="compensation"]');
           const salary = salaryElement?.textContent?.trim() || 'Salary not specified';
           
-          // Keyword filtering (lenient)
+          // Keyword filtering (very lenient - only filter if we have many jobs)
           let shouldInclude = true;
           if (keywords && keywords.trim().length > 0) {
             const jobText = `${title} ${description}`.toLowerCase();
@@ -972,8 +1003,9 @@ app.post('/scrape', async (req, res) => {
               return parts.some(p => jobText.includes(p)) || jobText.includes(part);
             });
             
-            // Very lenient: include if matches OR if we have very few jobs
-            if (!matchesKeyword && jobList.length >= 10) {
+            // Very lenient: only filter if we have 20+ jobs (was 10)
+            // This ensures we get jobs even if keywords don't match exactly
+            if (!matchesKeyword && jobList.length >= 20) {
               shouldInclude = false;
             }
           }
@@ -983,7 +1015,7 @@ app.post('/scrape', async (req, res) => {
               title: title,
               company: window.location.hostname.split('.')[0] || 'Unknown',
               location: jobLocation,
-              description: description.substring(0, 500) || null, // Limit description length
+              description: description || null, // Full description - no truncation
               url: jobUrl,
               salary: salary,
               jobType: null
@@ -995,9 +1027,13 @@ app.post('/scrape', async (req, res) => {
       });
       
       return jobList;
-    }, keywords || '', location || '');
+    }, { keywords: keywords || '', location: location || '' });
     
-    console.log(`✅ Scraped ${jobs.length} jobs from ${companyUrl}`);
+    if (jobs.length > 0) {
+      console.log(`✅ Scraped ${jobs.length} jobs from ${companyUrl}`);
+    } else {
+      console.log(`⚠️ Scraped 0 jobs from ${companyUrl} - check browser console logs for details`);
+    }
     
     await browser.close();
     browser = null;

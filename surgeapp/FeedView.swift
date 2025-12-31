@@ -8,10 +8,7 @@
 import SwiftUI
 
 struct FeedView: View {
-    @State private var selectedTab = 0 // 0: Jobs, 1: LinkedIn, 2: Emails
     @State private var jobPosts: [JobPost] = []
-    @State private var linkedInProfiles: [LinkedInProfile] = []
-    @State private var emailContacts: [EmailContact] = []
     @State private var loading = false
     @State private var error: String?
     @State private var careerInterests: [String] = []
@@ -45,20 +42,6 @@ struct FeedView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Tab Selector
-                Picker("", selection: $selectedTab) {
-                    Text("Jobs").tag(0)
-                    Text("LinkedIn").tag(1)
-                    Text("Emails").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .padding()
-                .onChange(of: selectedTab) { oldValue, newValue in
-                    Task {
-                        await fetchData()
-                    }
-                }
-                
                 // Content
                 if loading {
                     Spacer()
@@ -76,121 +59,65 @@ struct FeedView: View {
                     }
                     Spacer()
                 } else {
-                    if selectedTab == 0 {
-                        // Jobs Feed - Swipeable single card view (like sorce.jobs)
-                        if filteredJobPosts.isEmpty {
-                            VStack(spacing: 16) {
-                                Image(systemName: "briefcase.fill")
-                                    .font(.system(size: 60))
-                                    .foregroundColor(.secondary)
-                                Text("No jobs in feed")
-                                    .font(.headline)
-                                    .foregroundColor(.secondary)
-                                Text("Job posts will appear here")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.top, 100)
-                        } else {
-                            GeometryReader { geometry in
-                                ZStack {
-                                    // Show up to 3 cards stacked (sorce.jobs style - subtle stacking)
-                                    ForEach(Array(filteredJobPosts.enumerated()), id: \.element.id) { index, post in
-                                        if index >= currentJobIndex && index < currentJobIndex + 3 {
-                                            SwipeableJobCardView(
-                                                post: post,
-                                                onApply: {
-                                                    handleApply(to: post)
-                                                },
-                                                onPass: {
-                                                    handlePass()
-                                                }
-                                            )
-                                            .zIndex(Double(filteredJobPosts.count - index))
-                                            .offset(y: CGFloat(index - currentJobIndex) * 6) // Subtle offset
-                                            .scaleEffect(1.0 - CGFloat(index - currentJobIndex) * 0.02) // Subtle scale
-                                            .opacity(index == currentJobIndex ? 1.0 : max(0.7, 1.0 - CGFloat(index - currentJobIndex) * 0.15))
-                                        }
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            }
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
+                    // Jobs Feed - Swipeable single card view (like sorce.jobs)
+                    if filteredJobPosts.isEmpty {
+                        VStack(spacing: 16) {
+                            Image(systemName: "briefcase.fill")
+                                .font(.system(size: 60))
+                                .foregroundColor(.secondary)
+                            Text("No jobs in feed")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+                            Text("Job posts will appear here")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
                         }
-                    } else if selectedTab == 1 {
-                        // LinkedIn Feed
-                        ScrollView {
-                            LazyVStack(spacing: 20) {
-                                if linkedInProfiles.isEmpty {
-                                    VStack(spacing: 16) {
-                                        Image(systemName: "person.2.fill")
-                                            .font(.system(size: 60))
-                                            .foregroundColor(.secondary)
-                                        Text("No LinkedIn profiles in feed")
-                                            .font(.headline)
-                                            .foregroundColor(.secondary)
-                                        Text("LinkedIn profiles will appear here")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    .padding(.top, 100)
-                                } else {
-                                    ForEach(linkedInProfiles) { profile in
-                                        LinkedInProfileCard(profile: profile, isSaved: false, onToggleSave: {})
-                                    }
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                        }
+                        .padding(.top, 100)
                     } else {
-                        // Emails Feed
-                        ScrollView {
-                            LazyVStack(spacing: 20) {
-                                if emailContacts.isEmpty {
-                                    VStack(spacing: 16) {
-                                        Image(systemName: "envelope.fill")
-                                            .font(.system(size: 60))
-                                            .foregroundColor(.secondary)
-                                        Text("No email contacts in feed")
-                                            .font(.headline)
-                                            .foregroundColor(.secondary)
-                                        Text("Email contacts will appear here")
-                                            .font(.subheadline)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    .padding(.top, 100)
-                                } else {
-                                    ForEach(emailContacts) { contact in
-                                        EmailContactCard(contact: contact, isSaved: false, onToggleSave: {})
+                        GeometryReader { geometry in
+                            ZStack {
+                                // Show up to 3 cards stacked (sorce.jobs style - subtle stacking)
+                                ForEach(Array(filteredJobPosts.enumerated()), id: \.element.id) { index, post in
+                                    if index >= currentJobIndex && index < currentJobIndex + 3 {
+                                        SwipeableJobCardView(
+                                            post: post,
+                                            onApply: {
+                                                handleApply(to: post)
+                                            },
+                                            onPass: {
+                                                handlePass()
+                                            }
+                                        )
+                                        .zIndex(Double(filteredJobPosts.count - index))
+                                        .offset(y: CGFloat(index - currentJobIndex) * 6) // Subtle offset
+                                        .scaleEffect(1.0 - CGFloat(index - currentJobIndex) * 0.02) // Subtle scale
+                                        .opacity(index == currentJobIndex ? 1.0 : max(0.7, 1.0 - CGFloat(index - currentJobIndex) * 0.15))
                                     }
                                 }
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
                     }
                 }
             }
-            .navigationTitle("Feed")
+            .navigationTitle("")
             .toolbar {
-                if selectedTab == 0 {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: {
-                            showingFilters = true
-                        }) {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: filters.hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(filters.hasActiveFilters ? .blue : .primary)
-                                
-                                if filters.hasActiveFilters {
-                                    Circle()
-                                        .fill(Color.blue)
-                                        .frame(width: 8, height: 8)
-                                        .offset(x: 4, y: -4)
-                                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        showingFilters = true
+                    }) {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: filters.hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                                .font(.system(size: 20))
+                                .foregroundColor(filters.hasActiveFilters ? .blue : .primary)
+                            
+                            if filters.hasActiveFilters {
+                                Circle()
+                                    .fill(Color.blue)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 4, y: -4)
                             }
                         }
                     }
@@ -365,180 +292,141 @@ struct FeedView: View {
         error = nil
         
         do {
-            switch selectedTab {
-            case 0:
-                // Fetch Jobs from multiple sources, filtered by career interests
-                var allPosts: [JobPost] = []
-                
-                // Fetch from Supabase (existing jobs)
-                do {
-                    let supabasePosts = try await SupabaseService.shared.fetchJobPosts()
-                    // Filter Supabase posts by job titles (career interests) from filters
-                    let filterKeywords = !filters.jobTitles.isEmpty ? Array(filters.jobTitles) : careerInterests
-                    let filteredPosts = filterJobsByCareerInterests(supabasePosts, careerInterests: filterKeywords)
-                    allPosts.append(contentsOf: filteredPosts)
-                } catch {
-                    print("⚠️ Failed to fetch from Supabase: \(error.localizedDescription)")
+            // Fetch Jobs from multiple sources, filtered by career interests
+            var allPosts: [JobPost] = []
+            
+            // Fetch from Supabase (existing jobs)
+            do {
+                let supabasePosts = try await SupabaseService.shared.fetchJobPosts()
+                // Filter Supabase posts by job titles (career interests) from filters
+                let filterKeywords = !filters.jobTitles.isEmpty ? Array(filters.jobTitles) : careerInterests
+                let filteredPosts = filterJobsByCareerInterests(supabasePosts, careerInterests: filterKeywords)
+                allPosts.append(contentsOf: filteredPosts)
+            } catch {
+                print("⚠️ Failed to fetch from Supabase: \(error.localizedDescription)")
+            }
+            
+            // Use job titles from filters if available, otherwise use career interests
+            var searchKeywords: [String]
+            if !filters.jobTitles.isEmpty {
+                searchKeywords = Array(filters.jobTitles)
+            } else {
+                searchKeywords = careerInterests
+            }
+            
+            // If internship filter is selected, add "internship" to search keywords
+            if filters.jobTypes.contains(.internship) {
+                // Add "internship" to each keyword to search for internship positions
+                var internshipKeywords: [String] = []
+                for keyword in searchKeywords {
+                    internshipKeywords.append("\(keyword) internship")
+                    internshipKeywords.append("internship \(keyword)")
                 }
-                
-                // Use job titles from filters if available, otherwise use career interests
-                var searchKeywords: [String]
-                if !filters.jobTitles.isEmpty {
-                    searchKeywords = Array(filters.jobTitles)
+                // Also add standalone "internship" if no keywords
+                if searchKeywords.isEmpty {
+                    internshipKeywords.append("internship")
+                }
+                searchKeywords = internshipKeywords
+                print("🔍 Added internship keywords: \(internshipKeywords)")
+            }
+            
+            // Use locations from filters if available
+            let searchLocation: String?
+            if !filters.locations.isEmpty {
+                searchLocation = Array(filters.locations).first
+            } else if !filters.location.isEmpty {
+                searchLocation = filters.location
+            } else {
+                searchLocation = nil
+            }
+            
+            // Fetch from job scraping service (job boards, company pages, ATS)
+            do {
+                print("🔍 Fetching jobs from backend...")
+                print("🔍 Job titles/career interests: \(searchKeywords)")
+                print("🔍 Location: \(searchLocation ?? "none")")
+                let scrapedPosts = try await JobScrapingService.shared.fetchJobsFromBackend(
+                    keywords: searchKeywords.isEmpty ? nil : searchKeywords.joined(separator: " OR "),
+                    location: searchLocation,
+                    careerInterests: searchKeywords,
+                    minSalary: filters.minSalary,
+                    maxSalary: filters.maxSalary
+                )
+                print("✅ Fetched \(scrapedPosts.count) jobs from backend")
+                if scrapedPosts.isEmpty {
+                    print("⚠️ WARNING: Backend returned 0 jobs!")
                 } else {
-                    searchKeywords = careerInterests
-                }
-                
-                // If internship filter is selected, add "internship" to search keywords
-                if filters.jobTypes.contains(.internship) {
-                    // Add "internship" to each keyword to search for internship positions
-                    var internshipKeywords: [String] = []
-                    for keyword in searchKeywords {
-                        internshipKeywords.append("\(keyword) internship")
-                        internshipKeywords.append("internship \(keyword)")
+                    print("📋 Sample job from backend:")
+                    if let sample = scrapedPosts.first {
+                        print("   - ID: \(sample.id)")
+                        print("   - Title: \(sample.title)")
+                        print("   - Company: \(sample.company)")
                     }
-                    // Also add standalone "internship" if no keywords
-                    if searchKeywords.isEmpty {
-                        internshipKeywords.append("internship")
-                    }
-                    searchKeywords = internshipKeywords
-                    print("🔍 Added internship keywords: \(internshipKeywords)")
                 }
-                
-                // Use locations from filters if available
-                let searchLocation: String?
-                if !filters.locations.isEmpty {
-                    searchLocation = Array(filters.locations).first
-                } else if !filters.location.isEmpty {
-                    searchLocation = filters.location
-                } else {
-                    searchLocation = nil
-                }
-                
-                // Fetch from job scraping service (job boards, company pages, ATS)
+                allPosts.append(contentsOf: scrapedPosts)
+            } catch {
+                print("⚠️ Backend API error: \(error.localizedDescription)")
+                // If backend API is not available, try direct scraping (limited)
+                print("⚠️ Attempting direct scraping as fallback...")
                 do {
-                    print("🔍 Fetching jobs from backend...")
-                    print("🔍 Job titles/career interests: \(searchKeywords)")
-                    print("🔍 Location: \(searchLocation ?? "none")")
-                    let scrapedPosts = try await JobScrapingService.shared.fetchJobsFromBackend(
+                    let directPosts = try await JobScrapingService.shared.fetchJobsFromAllSources(
                         keywords: searchKeywords.isEmpty ? nil : searchKeywords.joined(separator: " OR "),
                         location: searchLocation,
                         careerInterests: searchKeywords
                     )
-                    print("✅ Fetched \(scrapedPosts.count) jobs from backend")
-                    if scrapedPosts.isEmpty {
-                        print("⚠️ WARNING: Backend returned 0 jobs!")
-                    } else {
-                        print("📋 Sample job from backend:")
-                        if let sample = scrapedPosts.first {
-                            print("   - ID: \(sample.id)")
-                            print("   - Title: \(sample.title)")
-                            print("   - Company: \(sample.company)")
-                        }
-                    }
-                    allPosts.append(contentsOf: scrapedPosts)
+                    print("✅ Fetched \(directPosts.count) jobs from direct scraping")
+                    allPosts.append(contentsOf: directPosts)
                 } catch {
-                    print("⚠️ Backend API error: \(error.localizedDescription)")
-                    // If backend API is not available, try direct scraping (limited)
-                    print("⚠️ Attempting direct scraping as fallback...")
-                    do {
-                        let directPosts = try await JobScrapingService.shared.fetchJobsFromAllSources(
-                            keywords: searchKeywords.isEmpty ? nil : searchKeywords.joined(separator: " OR "),
-                            location: searchLocation,
-                            careerInterests: searchKeywords
-                        )
-                        print("✅ Fetched \(directPosts.count) jobs from direct scraping")
-                        allPosts.append(contentsOf: directPosts)
-                    } catch {
-                        print("⚠️ Direct scraping also failed: \(error.localizedDescription)")
+                    print("⚠️ Direct scraping also failed: \(error.localizedDescription)")
+                }
+            }
+            
+            await MainActor.run {
+                print("📊 Processing \(allPosts.count) total posts from all sources")
+                var uniquePosts: [JobPost] = []
+                var seenIds = Set<String>()
+                
+                for post in allPosts {
+                    if !seenIds.contains(post.id) {
+                        seenIds.insert(post.id)
+                        uniquePosts.append(post)
                     }
                 }
                 
-                await MainActor.run {
-                    print("📊 Processing \(allPosts.count) total posts from all sources")
-                    var uniquePosts: [JobPost] = []
-                    var seenIds = Set<String>()
-                    
-                    for post in allPosts {
-                        if !seenIds.contains(post.id) {
-                            seenIds.insert(post.id)
-                            uniquePosts.append(post)
-                        }
-                    }
-                    
-                    print("📊 After deduplication: \(uniquePosts.count) unique posts")
-                    
-                    // Sort by posted date (most recent first)
-                    uniquePosts.sort { post1, post2 in
-                        post1.postedDate > post2.postedDate
-                    }
-                    
-                    self.allJobPosts = uniquePosts
-                    self.jobPosts = uniquePosts // Keep for compatibility
-                    // Reset to first job when new jobs are loaded
-                    if self.currentJobIndex >= uniquePosts.count {
-                        self.currentJobIndex = 0
-                    }
-                    self.loading = false
-                    
-                    print("✅ Updated UI with \(uniquePosts.count) jobs")
-                    print("   - allJobPosts count: \(self.allJobPosts.count)")
-                    print("   - jobPosts count: \(self.jobPosts.count)")
-                    print("   - filteredJobPosts count: \(self.filteredJobPosts.count)")
-                    
-                    // Debug: Print first job if available
-                    if let firstJob = uniquePosts.first {
-                        print("📋 First job sample:")
-                        print("   - ID: \(firstJob.id)")
-                        print("   - Title: \(firstJob.title)")
-                        print("   - Company: \(firstJob.company)")
-                        print("   - Location: \(firstJob.location)")
-                        print("   - Posted Date: \(firstJob.postedDate)")
-                    }
-                    
-                    // Queue jobs for auto-apply (like sorce.jobs)
-                    // This will automatically apply to company career pages
-                    Task {
-                        AutoApplyQueueService.shared.queueJobsForAutoApply(uniquePosts)
-                    }
+                print("📊 After deduplication: \(uniquePosts.count) unique posts")
+                
+                // Sort by posted date (most recent first)
+                uniquePosts.sort { post1, post2 in
+                    post1.postedDate > post2.postedDate
                 }
-            case 1:
-                // Fetch LinkedIn Profiles
-                let profiles = try await SupabaseService.shared.fetchLinkedInProfiles()
-                await MainActor.run {
-                    var uniqueProfiles: [LinkedInProfile] = []
-                    var seenIds = Set<String>()
-                    
-                    for profile in profiles {
-                        if !seenIds.contains(profile.id) {
-                            seenIds.insert(profile.id)
-                            uniqueProfiles.append(profile)
-                        }
-                    }
-                    
-                    self.linkedInProfiles = uniqueProfiles
-                    self.loading = false
+                
+                self.allJobPosts = uniquePosts
+                self.jobPosts = uniquePosts // Keep for compatibility
+                // Reset to first job when new jobs are loaded
+                if self.currentJobIndex >= uniquePosts.count {
+                    self.currentJobIndex = 0
                 }
-            case 2:
-                // Fetch Email Contacts
-                let contacts = try await SupabaseService.shared.fetchEmailContacts()
-                await MainActor.run {
-                    var uniqueContacts: [EmailContact] = []
-                    var seenIds = Set<String>()
-                    
-                    for contact in contacts {
-                        if !seenIds.contains(contact.id) {
-                            seenIds.insert(contact.id)
-                            uniqueContacts.append(contact)
-                        }
-                    }
-                    
-                    self.emailContacts = uniqueContacts
-                    self.loading = false
+                self.loading = false
+                
+                print("✅ Updated UI with \(uniquePosts.count) jobs")
+                print("   - allJobPosts count: \(self.allJobPosts.count)")
+                print("   - jobPosts count: \(self.jobPosts.count)")
+                print("   - filteredJobPosts count: \(self.filteredJobPosts.count)")
+                
+                // Debug: Print first job if available
+                if let firstJob = uniquePosts.first {
+                    print("📋 First job sample:")
+                    print("   - ID: \(firstJob.id)")
+                    print("   - Title: \(firstJob.title)")
+                    print("   - Company: \(firstJob.company)")
+                    print("   - Location: \(firstJob.location)")
+                    print("   - Posted Date: \(firstJob.postedDate)")
                 }
-            default:
-                await MainActor.run {
-                    self.loading = false
+                
+                // Queue jobs for auto-apply (like sorce.jobs)
+                // This will automatically apply to company career pages
+                Task {
+                    AutoApplyQueueService.shared.queueJobsForAutoApply(uniquePosts)
                 }
             }
         } catch {

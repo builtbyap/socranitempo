@@ -14,6 +14,8 @@ struct JobFiltersView: View {
     @State private var selectedLocations: Set<String> = []
     @State private var showingJobTitlePicker = false
     @State private var showingLocationPicker = false
+    @State private var minSalaryText: String = ""
+    @State private var maxSalaryText: String = ""
     
     // Load career interests and user location on appear
     private func loadDefaults() {
@@ -268,6 +270,66 @@ struct JobFiltersView: View {
                         }
                     }
                     
+                    // Salary Range Section
+                    FilterSection(
+                        title: "Salary Range",
+                        count: nil,
+                        showInfo: false
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Minimum Salary")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                    
+                                    HStack {
+                                        Text("$")
+                                            .foregroundColor(.secondary)
+                                        TextField("0", text: $minSalaryText)
+                                            .keyboardType(.numberPad)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 80)
+                                        Text("k")
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                
+                                Spacer()
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Maximum Salary")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                    
+                                    HStack {
+                                        Text("$")
+                                            .foregroundColor(.secondary)
+                                        TextField("0", text: $maxSalaryText)
+                                            .keyboardType(.numberPad)
+                                            .textFieldStyle(.roundedBorder)
+                                            .frame(width: 80)
+                                        Text("k")
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                            
+                            if !minSalaryText.isEmpty || !maxSalaryText.isEmpty {
+                                Button(action: {
+                                    minSalaryText = ""
+                                    maxSalaryText = ""
+                                    filters.minSalary = nil
+                                    filters.maxSalary = nil
+                                }) {
+                                    Text("Clear Salary Range")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                    }
+                    
                     // Job Requirements Section
                     FilterSection(
                         title: "Job Requirements",
@@ -328,6 +390,16 @@ struct JobFiltersView: View {
             }
             .sheet(isPresented: $showingLocationPicker) {
                 LocationPickerView(selectedLocations: $selectedLocations, filters: $filters)
+            }
+            .onAppear {
+                loadDefaults()
+                // Load existing salary filters
+                if let minSalary = filters.minSalary {
+                    minSalaryText = "\(minSalary)"
+                }
+                if let maxSalary = filters.maxSalary {
+                    maxSalaryText = "\(maxSalary)"
+                }
             }
             .onAppear {
                 loadDefaults()
@@ -725,42 +797,118 @@ struct JobFilters {
         // Filter by salary range (minimum and maximum)
         if minSalary != nil || maxSalary != nil {
             filtered = filtered.filter { job in
-                guard let salary = job.salary else { return false }
+                guard let salary = job.salary, !salary.lowercased().contains("not specified") else {
+                    // If no salary info, exclude it (user wants specific salary range)
+                    return false
+                }
                 
-                // Extract salary range from string (e.g., "$120,000 - $150,000")
-                // Try to extract both min and max, or just a single value
+                // Extract salary range from string (e.g., "$120k - $150k", "$120,000 - $150,000", "$100k+")
                 let salaryLower = salary.lowercased()
-                let numbers = salary.components(separatedBy: CharacterSet.decimalDigits.inverted).filter { !$0.isEmpty }
                 
-                // Try to parse range (e.g., "120000" and "150000" from "$120,000 - $150,000")
-                var minValue: Int?
-                var maxValue: Int?
+                // Check if it's hourly or monthly (need to convert)
+                let isHourly = salaryLower.contains("hour") || salaryLower.contains("hr") || salaryLower.contains("hourly")
+                let isMonthly = salaryLower.contains("month") || salaryLower.contains("mo") || salaryLower.contains("monthly")
+                
+                // Extract numbers - handle both "k" notation and full numbers
+                var numbers: [Int] = []
+                let numberPattern = #"(\d{1,3}(?:,\d{3})*(?:k|K)?)"#
+                if let regex = try? NSRegularExpression(pattern: numberPattern, options: []) {
+                    let nsString = salary as NSString
+                    let results = regex.matches(in: salary, options: [], range: NSRange(location: 0, length: nsString.length))
+                    for match in results {
+                        let matchString = nsString.substring(with: match.range)
+                        var value = Int(matchString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "k", with: "").replacingOccurrences(of: "K", with: "")) ?? 0
+                        
+                        // If it had "k", it's already in thousands
+                        // If it didn't have "k" and is > 1000, convert to thousands
+                        if !matchString.lowercased().contains("k") && value > 1000 {
+                            value = value / 1000
+                        }
+                        
+                        // Convert hourly to annual (rough estimate: $50/hr ≈ $100k/year)
+                        if isHourly {
+                            value = value * 2
+                        }
+                        // Convert monthly to annual
+                        if isMonthly {
+                            value = (value * 12) / 1000
+                        }
+                        
+                        numbers.append(value)
+                    }
+                }
+                
+                // If no numbers found, exclude the job
+                guard !numbers.isEmpty else {
+                    return false
+                }
+                
+                // Determine min and max from extracted numbers
+                var jobMin: Int?
+                var jobMax: Int?
                 
                 if numbers.count >= 2 {
-                    // Has range: use first as min, last as max
-                    if let first = Int(numbers[0]), let last = Int(numbers[numbers.count - 1]) {
-                        minValue = min(first, last)
-                        maxValue = max(first, last)
-                    }
+                    // Has range: use min and max of the numbers
+                    jobMin = numbers.min()
+                    jobMax = numbers.max()
                 } else if numbers.count == 1 {
-                    // Single value: use as both min and max
-                    if let value = Int(numbers[0]) {
-                        minValue = value
-                        maxValue = value
+                    // Single value
+                    let value = numbers[0]
+                    // Check if it's a minimum ("+", "minimum", "min") or maximum ("up to", "maximum", "max")
+                    if salaryLower.contains("+") || salaryLower.contains("minimum") || salaryLower.contains("min") {
+                        jobMin = value
+                        jobMax = nil
+                    } else if salaryLower.contains("up to") || salaryLower.contains("maximum") || salaryLower.contains("max") {
+                        jobMin = nil
+                        jobMax = value
+                    } else {
+                        // Treat as average, use ±20% as range
+                        jobMin = Int(Double(value) * 0.8)
+                        jobMax = Int(Double(value) * 1.2)
                     }
                 }
                 
                 // Check minimum salary filter
                 if let minSalary = minSalary {
-                    guard let jobMin = minValue, jobMin >= minSalary else {
-                        return false
+                    // Job's maximum must be >= requested minimum (job can't be entirely below min)
+                    if let jobMax = jobMax {
+                        if jobMax < minSalary {
+                            return false // Job is entirely below minimum
+                        }
+                    } else if let jobMin = jobMin {
+                        // If job only has min, check if it's >= requested min
+                        if jobMin < minSalary {
+                            return false
+                        }
+                    } else {
+                        return false // No salary info
                     }
                 }
                 
                 // Check maximum salary filter
                 if let maxSalary = maxSalary {
-                    guard let jobMax = maxValue, jobMax <= maxSalary else {
-                        return false
+                    // Job's minimum must be <= requested maximum (job can't be entirely above max)
+                    if let jobMin = jobMin {
+                        if jobMin > maxSalary {
+                            return false // Job is entirely above maximum
+                        }
+                    } else if let jobMax = jobMax {
+                        // If job only has max, check if it's <= requested max
+                        if jobMax > maxSalary {
+                            return false
+                        }
+                    } else {
+                        return false // No salary info
+                    }
+                }
+                
+                // If both min and max are specified, ensure job overlaps with range
+                if let minSalary = minSalary, let maxSalary = maxSalary {
+                    let jobMinValue = jobMin ?? 0
+                    let jobMaxValue = jobMax ?? Int.max
+                    // Job must overlap: job min <= requested max AND job max >= requested min
+                    if jobMinValue > maxSalary || jobMaxValue < minSalary {
+                        return false // No overlap
                     }
                 }
                 

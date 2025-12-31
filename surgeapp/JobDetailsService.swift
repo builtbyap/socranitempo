@@ -43,7 +43,7 @@ class JobDetailsService {
         print("📥 Job Details Response: \(String(data: data, encoding: .utf8) ?? "Unable to decode")")
         
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            // Handle wrapped format: { sections: [...] }
+            // Handle wrapped format: { sections: [...], salary: "..." }
             if let sectionsArray = json["sections"] as? [[String: Any]] {
                 print("✅ Found \(sectionsArray.count) sections in wrapped format")
                 let sections = try sectionsArray.compactMap { sectionDict -> JobSection? in
@@ -55,7 +55,8 @@ class JobDetailsService {
                         return nil
                     }
                 }
-                return JobDetails(sections: sections)
+                let salary = json["salary"] as? String
+                return JobDetails(sections: sections, salary: salary)
             }
             
             // Check for error in response
@@ -77,18 +78,19 @@ class JobDetailsService {
                     return nil
                 }
             }
-            return JobDetails(sections: sections)
+            return JobDetails(sections: sections, salary: nil)
         }
         
         // If no sections found, return empty
         print("⚠️ No sections found in response")
-        return JobDetails(sections: [])
+        return JobDetails(sections: [], salary: nil)
     }
 }
 
 // MARK: - Job Details Model
 struct JobDetails: Codable {
     let sections: [JobSection]
+    let salary: String?
 }
 
 // MARK: - Job Details Error
