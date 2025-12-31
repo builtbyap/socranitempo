@@ -177,9 +177,9 @@ struct JobFiltersView: View {
                         }
                     }
                     
-                    // Remote Options Section
+                    // Work Arrangements Section
                     FilterSection(
-                        title: "Remote Options",
+                        title: "Work arrangements",
                         count: nil,
                         showInfo: false
                     ) {

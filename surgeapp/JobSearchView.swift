@@ -320,419 +320,447 @@ struct JobPostCard: View {
     @State private var detailsError: String? = nil
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header Section (sorce.jobs style - clean and minimal)
-            VStack(alignment: .leading, spacing: 12) {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                // Category Tag (sorce.jobs style)
+                HStack {
+                    Text(extractCategory(from: post))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(8)
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+                
+                // Job Title with Up Arrow Button (sorce.jobs style)
                 HStack(alignment: .top, spacing: 12) {
-                    // Company Avatar (larger, more prominent)
-                    ZStack {
-                        Circle()
-                            .fill(Color.blue.opacity(0.1))
-                            .frame(width: 56, height: 56)
-                        Text(String(post.company.prefix(1)).uppercased())
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundColor(.blue)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        // Job Title (larger, bolder)
-                        Text(post.title)
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(.primary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        
-                        // Company Name
-                        Text(post.company)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
+                    Text(post.title)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundColor(.primary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
                     
                     Spacer()
                     
-                    // Save Button (top right)
+                    // Up Arrow Button (white circle)
                     Button(action: onToggleSave) {
-                        Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
-                            .foregroundColor(isSaved ? .blue : .gray)
-                            .font(.system(size: 22))
+                        ZStack {
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 36, height: 36)
+                                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.primary)
+                        }
                     }
+                    .buttonStyle(PlainButtonStyle())
                 }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
                 
-                // Quick Info Row (sorce.jobs style - compact, icon-based)
-                HStack(spacing: 16) {
-                    // Location
-                    HStack(spacing: 4) {
-                        Image(systemName: "mappin.circle.fill")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 14))
-                        Text(post.location)
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(.secondary)
+                // Company Logo and Name (sorce.jobs style)
+                HStack(spacing: 12) {
+                    // Company Logo (black circle with white letter)
+                    ZStack {
+                        Circle()
+                            .fill(Color.black)
+                            .frame(width: 48, height: 48)
+                        Text(String(post.company.prefix(1)).uppercased())
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.white)
                     }
                     
-                    // Salary
-                    if let salary = post.salary, salary != "Salary not specified" {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(post.company)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.primary)
+                        
+                        // Location
                         HStack(spacing: 4) {
-                            Image(systemName: "dollarsign.circle.fill")
-                                .foregroundColor(.green)
+                            Image(systemName: "mappin.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                            Text(post.location)
                                 .font(.system(size: 14))
-                            Text(salary)
-                                .font(.system(size: 14, weight: .regular))
                                 .foregroundColor(.secondary)
                         }
                     }
                     
-                    // Posted Date
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock.fill")
-                            .foregroundColor(.secondary)
-                            .font(.system(size: 12))
-                        Text(formatDate(post.postedDate))
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundColor(.secondary)
-                    }
+                    Spacer()
                 }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
-            .padding(.bottom, 20)
-            
-            // Job Description Section (always visible with fade-out, like sorce.jobs)
-            if let description = post.description, !description.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    // Scrollable description with fade-out gradient
-                    GeometryReader { geometry in
-                        ZStack(alignment: .bottom) {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    Text(description)
-                                        .font(.system(size: 15))
-                                        .foregroundColor(.primary)
-                                        .lineSpacing(6)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .padding(.horizontal, 20)
-                                        .padding(.bottom, 100) // Extra padding for gradient overlay
-                                }
-                            }
-                            
-                            // Fade-out gradient at bottom (like sorce.jobs)
-                            VStack {
-                                Spacer()
-                                LinearGradient(
-                                    gradient: Gradient(colors: [
-                                        Color(.systemBackground).opacity(0),
-                                        Color(.systemBackground).opacity(0.3),
-                                        Color(.systemBackground).opacity(0.6),
-                                        Color(.systemBackground)
-                                    ]),
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                                .frame(height: 100)
-                            }
-                            .allowsHitTesting(false)
-                        }
-                    }
-                    .frame(maxHeight: .infinity) // Fill available space
-                }
-            } else {
-                // If no description, add spacer to push buttons to bottom
-                Spacer()
-            }
-            
-            // Expanded Details Section (sorce.jobs style)
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 0) {
-                    Divider()
-                        .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+                
+                // Work arrangement Section (sorce.jobs style)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Work arrangement")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
                     
-                    VStack(alignment: .leading, spacing: 20) {
-                        // Job Details from URL (fetched when View Job is pressed)
-                        if isLoadingDetails {
-                            HStack {
-                                Spacer()
-                                ProgressView()
-                                    .padding()
-                                Spacer()
+                    HStack(spacing: 8) {
+                        // Remote badge
+                        if isRemoteJob(post: post) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "globe")
+                                    .font(.system(size: 11))
+                                Text("Remote")
+                                    .font(.system(size: 13, weight: .medium))
                             }
-                        } else if let error = detailsError {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Unable to load job details")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(.red)
-                                Text(error)
-                                    .font(.system(size: 14))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                        } else if let details = jobDetails {
-                            if details.sections.isEmpty {
-                                // No sections found
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("No additional information available")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                            } else {
-                                // Display sections
-                                VStack(alignment: .leading, spacing: 16) {
-                                    Text("Job Information")
-                                        .font(.system(size: 18, weight: .semibold))
-                                        .foregroundColor(.primary)
-                                        .padding(.horizontal, 20)
-                                        .padding(.top, 20)
-                                    
-                                    ForEach(details.sections) { section in
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text(section.title)
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .foregroundColor(.primary)
-                                            
-                                            Text(section.content)
-                                                .font(.system(size: 14))
-                                                .foregroundColor(.secondary)
-                                                .lineSpacing(4)
-                                        }
-                                        .padding(.horizontal, 20)
-                                        .padding(.vertical, 12)
-                                        
-                                        if section.id != details.sections.last?.id {
-                                            Divider()
-                                                .padding(.horizontal, 20)
-                                        }
-                                    }
-                                }
-                                .padding(.bottom, 12)
-                            }
+                            .foregroundColor(.teal)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.teal.opacity(0.1))
+                            .cornerRadius(16)
                         }
                         
-                        // Key Information Grid
-                        VStack(alignment: .leading, spacing: 16) {
-                            Text("Details")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundColor(.primary)
-                                .padding(.horizontal, 16)
-                            
-                            VStack(spacing: 0) {
-                                // Salary
-                                if let salary = post.salary {
-                                    HStack(alignment: .top, spacing: 16) {
-                                        Image(systemName: "dollarsign.circle.fill")
-                                            .foregroundColor(.green)
-                                            .font(.system(size: 18))
-                                            .frame(width: 24)
-                                        
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Salary")
-                                                .font(.system(size: 13))
-                                                .foregroundColor(.secondary)
-                                            Text(salary)
-                                                .font(.system(size: 15, weight: .medium))
-                                                .foregroundColor(.primary)
-                                        }
-                                        
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-                                    
-                                    Divider()
-                                        .padding(.leading, 56)
-                                }
-                                
-                                // Job Type
-                                if let jobType = post.jobType {
-                                    HStack(alignment: .top, spacing: 16) {
-                                        Image(systemName: "clock.fill")
-                                            .foregroundColor(.orange)
-                                            .font(.system(size: 18))
-                                            .frame(width: 24)
-                                        
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Job Type")
-                                                .font(.system(size: 13))
-                                                .foregroundColor(.secondary)
-                                            Text(jobType)
-                                                .font(.system(size: 15, weight: .medium))
-                                                .foregroundColor(.primary)
-                                        }
-                                        
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-                                    
-                                    Divider()
-                                        .padding(.leading, 56)
-                                }
-                                
-                                // Location
-                                HStack(alignment: .top, spacing: 16) {
-                                    Image(systemName: "location.fill")
-                                        .foregroundColor(.blue)
-                                        .font(.system(size: 18))
-                                        .frame(width: 24)
-                                    
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Location")
-                                            .font(.system(size: 13))
-                                            .foregroundColor(.secondary)
-                                        Text(post.location)
-                                            .font(.system(size: 15, weight: .medium))
-                                            .foregroundColor(.primary)
-                                    }
-                                    
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                                
-                                if post.url != nil {
-                                    Divider()
-                                        .padding(.leading, 56)
-                                }
-                                
-                                // Posted Date
-                                HStack(alignment: .top, spacing: 16) {
-                                    Image(systemName: "calendar")
-                                        .foregroundColor(.purple)
-                                        .font(.system(size: 18))
-                                        .frame(width: 24)
-                                    
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("Posted")
-                                            .font(.system(size: 13))
-                                            .foregroundColor(.secondary)
-                                        Text(formatDate(post.postedDate))
-                                            .font(.system(size: 15, weight: .medium))
-                                            .foregroundColor(.primary)
-                                    }
-                                    
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-                                
-                                // Application URL
-            if let url = post.url, !url.isEmpty {
-                                    Divider()
-                                        .padding(.leading, 56)
-                                    
-                                    HStack(alignment: .top, spacing: 16) {
-                                        Image(systemName: "link")
-                                            .foregroundColor(.blue)
-                                            .font(.system(size: 18))
-                                            .frame(width: 24)
-                                        
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text("Apply")
-                                                .font(.system(size: 13))
-                                                .foregroundColor(.secondary)
-                Button(action: {
-                    if let url = URL(string: url) {
-                        UIApplication.shared.open(url)
-                                                }
-                                            }) {
-                                                HStack(spacing: 4) {
-                                                    Text("View on company website")
-                                                        .font(.system(size: 15, weight: .medium))
-                                                    Image(systemName: "arrow.up.right.square")
-                                                        .font(.system(size: 13))
-                                                }
-                                                .foregroundColor(.blue)
-                                            }
-                                        }
-                                        
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-                                }
+                        // Job Type badge
+                        if let jobType = post.jobType, !jobType.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "briefcase.fill")
+                                    .font(.system(size: 11))
+                                Text(jobType)
+                                    .font(.system(size: 13, weight: .medium))
                             }
-                            .background(Color(.systemBackground))
+                            .foregroundColor(.purple)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.purple.opacity(0.1))
+                            .cornerRadius(16)
                         }
-                        .padding(.top, 8)
-                        .padding(.bottom, 20)
-                    }
-                    .background(Color(.systemGray6))
-                }
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .move(edge: .top)),
-                    removal: .opacity.combined(with: .move(edge: .top))
-                ))
-            }
-            
-            // Action Buttons (sorce.jobs style - fixed at bottom)
-            VStack(spacing: 0) {
-                // Divider above buttons
-                Divider()
-                    .padding(.horizontal, 20)
-                
-                VStack(spacing: 12) {
-                    // Simple Apply Button (if available)
-                    if let onSimpleApply = onSimpleApply {
-                        Button(action: onSimpleApply) {
-                            HStack {
-                                Spacer()
-                                Image(systemName: "paperplane.fill")
-                                    .font(.system(size: 16, weight: .semibold))
-                                Text("Simple Apply")
-                                    .font(.system(size: 16, weight: .semibold))
-                                Spacer()
-                            }
-                            .foregroundColor(.white)
-                            .padding(.vertical, 16)
-                            .background(Color.green)
-                            .cornerRadius(12)
-                        }
-                    }
-                    
-                    // View Job Button (Toggle Expansion and Fetch Details)
-                    Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                            if !isExpanded {
-                                // Expanding - fetch job details
-                                isExpanded = true
-                                fetchJobDetails()
-                            } else {
-                                // Collapsing
-                                isExpanded = false
-                            }
-                        }
-                    }) {
-                        HStack {
-                            Spacer()
-                            if isLoadingDetails {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            } else {
-                                Text(isExpanded ? "Hide Details" : "View Job")
-                                    .font(.system(size: 16, weight: .semibold))
-                                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                    .font(.system(size: 12, weight: .semibold))
-                            }
-                            Spacer()
-                        }
-                        .foregroundColor(.white)
-                        .padding(.vertical, 16)
-                        .background(Color.blue)
-                        .cornerRadius(12)
                     }
                 }
                 .padding(.horizontal, 20)
-                .padding(.top, 16)
+                .padding(.bottom, 16)
+                
+                // Experience level Section (sorce.jobs style)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Experience level")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                    
+                    HStack(spacing: 4) {
+                        Image(systemName: "graduationcap.fill")
+                            .font(.system(size: 11))
+                        Text("Entry Level")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundColor(.pink)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.pink.opacity(0.1))
+                    .cornerRadius(16)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                
+                // Education Section (sorce.jobs style)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Education")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                    
+                    HStack(spacing: 4) {
+                        Image(systemName: "book.fill")
+                            .font(.system(size: 11))
+                        Text("Bachelor's")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundColor(.purple)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.purple.opacity(0.1))
+                    .cornerRadius(16)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                
+                // Job Description Section (sorce.jobs style - always visible, full text)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Job description")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                    
+                    if let description = post.description, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 14))
+                            .foregroundColor(.primary)
+                            .lineSpacing(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        // Show placeholder if no description available
+                        Text("No description available")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
+                }
+                .padding(.horizontal, 20)
                 .padding(.bottom, 20)
-                .background(Color(.systemBackground))
+            
+                // Expanded Job Information (when tapped)
+                if isExpanded {
+                    if isLoadingDetails {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                                .padding()
+                            Spacer()
+                        }
+                        .padding(.vertical, 20)
+                    } else if let error = detailsError {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Unable to load job details")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.red)
+                            Text(error)
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                    } else if let details = jobDetails, !details.sections.isEmpty {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(details.sections) { section in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(section.title)
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                    
+                                    Text(section.content)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.secondary)
+                                        .lineSpacing(4)
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                
+                                if section.id != details.sections.last?.id {
+                                    Divider()
+                                        .padding(.horizontal, 20)
+                                }
+                            }
+                        }
+                        .padding(.bottom, 20)
+                    }
+                }
+            
+            
+                // Action Buttons (sorce.jobs style - 5 circular buttons)
+                HStack(spacing: 16) {
+                    Spacer()
+                    
+                    // Back/Undo button
+                    Button(action: {}) {
+                        ZStack {
+                            Circle()
+                                .fill(Color(.systemGray5))
+                                .frame(width: 44, height: 44)
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.system(size: 18))
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Reject button
+                    Button(action: {}) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 44, height: 44)
+                                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Save/Bookmark button
+                    Button(action: onToggleSave) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 44, height: 44)
+                                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                            Image(systemName: isSaved ? "bookmark.fill" : "doc.text")
+                                .font(.system(size: 18))
+                                .foregroundColor(isSaved ? .blue : .yellow)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Like/Favorite button
+                    Button(action: {}) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 44, height: 44)
+                                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                            Image(systemName: "heart.fill")
+                                .font(.system(size: 18))
+                                .foregroundColor(.green)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Share button
+                    Button(action: {}) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white)
+                                .frame(width: 44, height: 44)
+                                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 18))
+                                .foregroundColor(.primary)
+                        }
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 30)
+                }
+                .frame(minHeight: geometry.size.height)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
-        .cornerRadius(20)
-        .shadow(color: Color.black.opacity(0.1), radius: 12, x: 0, y: 4)
+        .cornerRadius(16)
+        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            // Toggle expansion when card is tapped (like sorce.jobs)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                isExpanded.toggle()
+                if isExpanded && jobDetails == nil && !isLoadingDetails {
+                    fetchJobDetails()
+                }
+            }
+        }
+        .onAppear {
+            // Auto-fetch job details when card appears (like sorce.jobs)
+            if jobDetails == nil && !isLoadingDetails {
+                fetchJobDetails()
+            }
+        }
+    }
+    
+    // MARK: - Helper Functions
+    private func extractCategory(from post: JobPost) -> String {
+        // Extract category from job title or description
+        let title = post.title.lowercased()
+        let description = post.description?.lowercased() ?? ""
+        
+        if title.contains("intern") || description.contains("intern") {
+            return "Internships"
+        } else if title.contains("engineer") || description.contains("engineer") {
+            return "Engineering"
+        } else if title.contains("data") || description.contains("data") {
+            return "Data Center Services"
+        } else if title.contains("design") || description.contains("design") {
+            return "Design"
+        } else if title.contains("marketing") || description.contains("marketing") {
+            return "Marketing"
+        } else if title.contains("product") || description.contains("product") {
+            return "Product"
+        } else {
+            return "General"
+        }
+    }
+    
+    private func isRemoteJob(post: JobPost) -> Bool {
+        let locationLower = post.location.lowercased()
+        let jobTypeLower = post.jobType?.lowercased() ?? ""
+        let descriptionLower = post.description?.lowercased() ?? ""
+        let titleLower = post.title.lowercased()
+        
+        let remoteKeywords = ["remote", "anywhere", "work from home", "wfh", "distributed", "virtual", "telecommute", "telecommuting"]
+        
+        return remoteKeywords.contains { locationLower.contains($0) } ||
+               remoteKeywords.contains { jobTypeLower.contains($0) } ||
+               remoteKeywords.contains { descriptionLower.contains($0) } ||
+               remoteKeywords.contains { titleLower.contains($0) }
+    }
+    
+    private func buildInfoBubbles(for post: JobPost) -> [BubbleInfo] {
+        var bubbles: [BubbleInfo] = []
+        
+        // Location Bubble (always show, but truncate if too long)
+        let locationText = truncateText(post.location, maxLength: 25)
+        bubbles.append(BubbleInfo(id: "location", icon: "mappin.circle.fill", text: locationText, color: .blue))
+        
+        // Remote Option Bubble (if detected)
+        if isRemoteJob(post: post) {
+            bubbles.append(BubbleInfo(id: "remote", icon: "house.fill", text: "Remote", color: .green))
+        }
+        
+        // Salary Bubble (clean and format)
+        if let salary = post.salary, salary != "Salary not specified" && salary.lowercased() != "salary not specified" {
+            let cleanSalary = cleanSalaryText(salary)
+            if !cleanSalary.isEmpty {
+                bubbles.append(BubbleInfo(id: "salary", icon: "dollarsign.circle.fill", text: cleanSalary, color: .green))
+            }
+        }
+        
+        // Job Type Bubble
+        if let jobType = post.jobType, !jobType.isEmpty {
+            let cleanJobType = truncateText(jobType, maxLength: 20)
+            bubbles.append(BubbleInfo(id: "jobType", icon: "briefcase.fill", text: cleanJobType, color: .orange))
+        }
+        
+        // Posted Date Bubble
+        bubbles.append(BubbleInfo(id: "date", icon: "clock.fill", text: formatDate(post.postedDate), color: .purple))
+        
+        return bubbles
+    }
+    
+    private func truncateText(_ text: String, maxLength: Int) -> String {
+        if text.count <= maxLength {
+            return text
+        }
+        return String(text.prefix(maxLength - 3)) + "..."
+    }
+    
+    private func cleanSalaryText(_ salary: String) -> String {
+        // Clean up salary text - remove extra whitespace, normalize format
+        var cleaned = salary.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Remove common prefixes
+        let prefixes = ["Salary:", "Compensation:", "Pay:", "Wage:"]
+        for prefix in prefixes {
+            if cleaned.lowercased().hasPrefix(prefix.lowercased()) {
+                cleaned = String(cleaned.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        
+        // Normalize common abbreviations
+        cleaned = cleaned.replacingOccurrences(of: "per year", with: "/yr", options: .caseInsensitive)
+        cleaned = cleaned.replacingOccurrences(of: "per month", with: "/mo", options: .caseInsensitive)
+        cleaned = cleaned.replacingOccurrences(of: "per hour", with: "/hr", options: .caseInsensitive)
+        cleaned = cleaned.replacingOccurrences(of: "annually", with: "/yr", options: .caseInsensitive)
+        cleaned = cleaned.replacingOccurrences(of: "monthly", with: "/mo", options: .caseInsensitive)
+        cleaned = cleaned.replacingOccurrences(of: "hourly", with: "/hr", options: .caseInsensitive)
+        
+        // Truncate if too long
+        return truncateText(cleaned, maxLength: 20)
+    }
+    
+    // MARK: - Bubble Info Model
+    struct BubbleInfo: Identifiable {
+        let id: String
+        let icon: String
+        let text: String
+        let color: Color
     }
     
     private func formatDate(_ dateString: String) -> String {
@@ -764,8 +792,8 @@ struct JobPostCard: View {
             return
         }
         
-        // Don't fetch again if we already have details
-        if jobDetails != nil {
+        // Don't fetch again if we already have details or are currently loading
+        if jobDetails != nil || isLoadingDetails {
             return
         }
         
@@ -788,6 +816,91 @@ struct JobPostCard: View {
                     self.detailsError = error.localizedDescription
                 }
             }
+        }
+    }
+}
+
+// MARK: - Info Bubble Component (sorce.jobs style)
+struct InfoBubble: View {
+    let icon: String
+    let text: String
+    let color: Color
+    
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(color)
+            
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(color.opacity(0.15))
+        )
+        .overlay(
+            Capsule()
+                .stroke(color.opacity(0.3), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Flow Layout (for wrapping bubbles)
+struct InfoBubbleFlowLayout: Layout {
+    var spacing: CGFloat = 8
+    
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = FlowResult(
+            in: proposal.replacingUnspecifiedDimensions().width,
+            subviews: subviews,
+            spacing: spacing
+        )
+        return result.size
+    }
+    
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = FlowResult(
+            in: bounds.width,
+            subviews: subviews,
+            spacing: spacing
+        )
+        for (index, subview) in subviews.enumerated() {
+            subview.place(at: CGPoint(x: bounds.minX + result.frames[index].minX,
+                                     y: bounds.minY + result.frames[index].minY),
+                         proposal: .unspecified)
+        }
+    }
+    
+    struct FlowResult {
+        var size: CGSize = .zero
+        var frames: [CGRect] = []
+        
+        init(in maxWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
+            var currentX: CGFloat = 0
+            var currentY: CGFloat = 0
+            var lineHeight: CGFloat = 0
+            
+            for subview in subviews {
+                let size = subview.sizeThatFits(.unspecified)
+                
+                if currentX + size.width > maxWidth && currentX > 0 {
+                    // Move to next line
+                    currentX = 0
+                    currentY += lineHeight + spacing
+                    lineHeight = 0
+                }
+                
+                frames.append(CGRect(x: currentX, y: currentY, width: size.width, height: size.height))
+                lineHeight = max(lineHeight, size.height)
+                currentX += size.width + spacing
+            }
+            
+            self.size = CGSize(width: maxWidth, height: currentY + lineHeight)
         }
     }
 }

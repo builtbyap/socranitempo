@@ -61,18 +61,16 @@ serve(async (req) => {
     // Search all queries (limit to 2 to avoid timeout)
     const queriesToSearch = searchQueries.slice(0, 2)
     
-    console.log(`🌐 Starting job search from ATS systems...`)
+    console.log(`🌐 Starting job search from Workday...`)
     console.log(`   - Search queries: ${JSON.stringify(queriesToSearch)}`)
-    console.log(`   - Searching ${queriesToSearch.length} queries across 3 ATS sources`)
+    console.log(`   - Searching ${queriesToSearch.length} queries using Workday`)
     
-    // Use Workday, Greenhouse, and Lever - these search across many companies
+    // Use only Workday for job searching
     const sources = [
-      { name: 'Greenhouse', fn: scrapeGreenhouse },
-      { name: 'Lever', fn: scrapeLever },
       { name: 'Workday', fn: scrapeWorkday }
     ]
     
-    console.log(`🔍 Searching ${sources.length} ATS sources (Greenhouse, Lever, Workday)...`)
+    console.log(`🔍 Searching Workday ATS source...`)
     
     // Early return threshold - if we get enough jobs, return immediately
     const EARLY_RETURN_THRESHOLD = 30 // Return early if we have 30+ jobs (lowered to return faster)
@@ -149,7 +147,7 @@ serve(async (req) => {
       await new Promise(resolve => setTimeout(resolve, 200))
     }
     
-    console.log(`\n✅ Job search complete - Found jobs from Greenhouse, Lever, and Workday`)
+    console.log(`\n✅ Job search complete - Found jobs from Workday`)
 
     // Only return real scraped jobs - no test/sample data
     console.log('\n📊 Scraping Summary:')
@@ -292,6 +290,85 @@ async function fetchFromAdzunaAPI(keywords: string, location: string): Promise<a
   }
 }
 
+// Enhanced data extraction helpers (AI-like parsing)
+function extractSalary(text: string | null | undefined): string {
+  if (!text) return "Salary not specified"
+  
+  const textLower = text.toLowerCase()
+  
+  // Enhanced salary patterns with better matching
+  const salaryPatterns = [
+    // Ranges: $100k - $150k, $100,000 - $150,000
+    /\$[\d,]+(?:k|K)?\s*[-–—]\s*\$?[\d,]+(?:k|K)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi,
+    // Single amounts: $100k, $100,000
+    /\$[\d,]+(?:k|K)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi,
+    // With context: "salary: $100k", "compensation: $100k - $150k"
+    /(?:salary|compensation|pay|wage|base|total|package).*?\$[\d,]+(?:k|K)?(?:\s*[-–—]\s*\$?[\d,]+(?:k|K)?)?/gi,
+    // Annual/monthly/hourly: "$100k annually", "$50/hour"
+    /\$[\d,]+(?:k|K)?\s*(?:annually|yearly|per\s+year|per\s+month|per\s+hour|hourly|monthly)/gi,
+  ]
+  
+  for (const pattern of salaryPatterns) {
+    const matches = text.match(pattern)
+    if (matches && matches.length > 0) {
+      // Clean up the match
+      let salary = matches[0].trim()
+      // Remove common prefixes
+      salary = salary.replace(/^(?:salary|compensation|pay|wage|base|total|package)[:\s]+/i, '')
+      // Normalize
+      salary = salary.replace(/\s+/g, ' ')
+      return salary
+    }
+  }
+  
+  return "Salary not specified"
+}
+
+function extractLocation(text: string | null | undefined, fallback: string = "Location not specified"): string {
+  if (!text) return fallback
+  
+  // Clean location text
+  let location = text.trim()
+  
+  // Remove common prefixes
+  location = location.replace(/^(?:location|based\s+in|located\s+in)[:\s]+/i, '')
+  
+  // Normalize common formats
+  location = location.replace(/\s*,\s*/g, ', ')
+  location = location.replace(/\s+/g, ' ')
+  
+  // If location contains "remote" or similar, keep it
+  const remoteKeywords = ['remote', 'anywhere', 'work from home', 'wfh', 'distributed', 'virtual']
+  const locationLower = location.toLowerCase()
+  if (remoteKeywords.some(keyword => locationLower.includes(keyword))) {
+    return location
+  }
+  
+  return location || fallback
+}
+
+function isRemoteLocation(location: string, description: string | null = null, title: string | null = null): boolean {
+  const remoteKeywords = ['remote', 'anywhere', 'work from home', 'wfh', 'distributed', 'virtual', 'telecommute', 'telecommuting']
+  const textToCheck = `${location} ${description || ''} ${title || ''}`.toLowerCase()
+  return remoteKeywords.some(keyword => textToCheck.includes(keyword))
+}
+
+function cleanJobType(jobType: string | null | undefined): string | null {
+  if (!jobType) return null
+  
+  // Normalize common job type formats
+  let cleaned = jobType.trim()
+  cleaned = cleaned.replace(/\s+/g, ' ')
+  cleaned = cleaned.replace(/^(?:type|job\s+type)[:\s]+/i, '')
+  
+  // Capitalize first letter
+  if (cleaned.length > 0) {
+    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1).toLowerCase()
+  }
+  
+  return cleaned || null
+}
+
 // Scrape Greenhouse (ATS)
 async function scrapeGreenhouse(keywords: string, location: string): Promise<any[]> {
   const jobs: any[] = []
@@ -384,17 +461,12 @@ async function scrapeGreenhouse(keywords: string, location: string): Promise<any
               
               matchedJobs++
               
-              // Extract salary from Greenhouse job data
+              // Extract salary using enhanced extraction
               let salary = "Salary not specified"
-              if (job.content) {
-                const salaryMatch = job.content.match(/\$[\d,]+(?:-\$?[\d,]+)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr))?/gi)
-                if (salaryMatch && salaryMatch.length > 0) {
-                  salary = salaryMatch[0]
-                }
-              }
-              // Check if Greenhouse API provides salary data
               if (job.salary || job.compensation) {
-                salary = job.salary || job.compensation
+                salary = extractSalary(job.salary || job.compensation)
+              } else if (job.content) {
+                salary = extractSalary(job.content)
               }
               
               const jobUrl = job.absolute_url || `https://boards.greenhouse.io/${company}/jobs/${job.id}`
@@ -405,12 +477,12 @@ async function scrapeGreenhouse(keywords: string, location: string): Promise<any
                 id: `greenhouse_${company}_${job.id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 title: job.title || 'Job Title',
                 company: job.departments?.[0]?.name || company,
-                location: jobLocation || location || 'Location not specified',
+                location: extractLocation(jobLocation || job.location, location || 'Location not specified'),
                 posted_date: job.updated_at ? new Date(job.updated_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                 description: job.content || null,
                 url: jobUrl,
                 salary: salary,
-                job_type: null,
+                job_type: cleanJobType(job.commitment || job.type),
               })
             }
             if (matchedJobs > 0 && jobsBeforeFilter > 0) {
@@ -535,8 +607,13 @@ async function scrapeLever(keywords: string, location: string): Promise<any[]> {
               
               matchedJobs++
               
-              // Extract salary from Lever job data - enhanced patterns
+              // Extract salary using enhanced extraction
               let salary = "Salary not specified"
+              if (job.salary || job.compensation) {
+                salary = extractSalary(job.salary || job.compensation)
+              } else if (job.text || job.descriptionPlain) {
+                salary = extractSalary(job.text || job.descriptionPlain)
+              }
               
               // Check if Lever API provides salary data first
               if (job.salaryRange || job.compensation) {
@@ -568,7 +645,7 @@ async function scrapeLever(keywords: string, location: string): Promise<any[]> {
                 id: `lever_${company}_${job.id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
                 title: job.text || 'Job Title',
                 company: company,
-                location: jobLocation || location || 'Location not specified',
+                location: extractLocation(jobLocation || job.categories?.location, location || 'Location not specified'),
                 posted_date: job.createdAt ? new Date(job.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
                 description: job.descriptionPlain || null,
                 url: jobUrl,
@@ -640,24 +717,41 @@ async function scrapeWorkday(keywords: string, location: string): Promise<any[]>
           try {
             const response = await fetch(workdayUrl, {
               headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9'
               }
             })
+            
+            console.log(`   🔍 ${company}: Fetching ${workdayUrl} - Status: ${response.status}`)
             
             if (response.ok) {
               const html = await response.text()
               const $ = load(html)
               
+              // Check if we found any job elements
+              const jobElements = $('[data-automation-id="jobTitle"], .job-title, [data-testid="job-title"], [data-automation-id="jobPosting"], a[href*="/jobs/"]')
+              console.log(`   📊 ${company}: Found ${jobElements.length} potential job elements on page`)
+              
+              if (jobElements.length === 0) {
+                console.log(`   ⚠️ ${company}: No job elements found - trying alternative selectors`)
+                // Try to see what's actually on the page
+                const pageText = $('body').text().substring(0, 500)
+                console.log(`   🔍 ${company}: Page preview: ${pageText}`)
+              }
+              
               // Workday uses specific data attributes and structures
               const workdayJobPromises: Promise<void>[] = []
+              let jobsFoundForCompany = 0
               
-              $('[data-automation-id="jobTitle"], .job-title, [data-testid="job-title"]').each((i: number, element: any) => {
+              $('[data-automation-id="jobTitle"], .job-title, [data-testid="job-title"], a[href*="/jobs/"]').each((i: number, element: any) => {
                 const jobPromise = (async () => {
                   try {
                     const $el = $(element)
                     const title = $el.text().trim()
                     
-                    // KEYWORD-BASED FILTERING - filter jobs by keywords/career interests
+                    // KEYWORD-BASED FILTERING - very lenient to avoid over-filtering
+                    let shouldInclude = true
                     if (keywords && keywords.trim().length > 0) {
                       const jobCard = $el.closest('[data-automation-id="jobPosting"]')
                       const description = jobCard.find('[data-automation-id="jobDescription"]').text() || ''
@@ -667,14 +761,29 @@ async function scrapeWorkday(keywords: string, location: string): Promise<any[]>
                       // Split keywords by "OR" and check if any match
                       const keywordParts = keywordsLower.split(/\s+or\s+/).map(k => k.trim())
                       const matchesKeyword = keywordParts.some(part => {
-                        // Check if any part of the keyword matches (flexible matching)
-                        const parts = part.split(/\s+/)
+                        // Very lenient matching - check if any word from keywords appears in job
+                        const parts = part.split(/\s+/).filter(p => p.length > 2) // Only check words longer than 2 chars
+                        if (parts.length === 0) return true // If no valid parts, include the job
                         return parts.some(p => jobText.includes(p)) || jobText.includes(part)
                       })
                       
+                      // If no keywords match, still include the job if we have very few jobs so far
+                      // This prevents over-filtering when keywords are too specific
                       if (!matchesKeyword) {
-                        return // Skip this job if it doesn't match keywords
+                        if (jobs.length < 10) {
+                          // Very lenient: include jobs even if they don't match keywords if we have <10 jobs
+                          console.log(`   ℹ️ Including "${title}" despite keyword mismatch (lenient mode: <10 jobs)`)
+                          shouldInclude = true
+                        } else {
+                          shouldInclude = false
+                        }
+                      } else {
+                        shouldInclude = true
                       }
+                    }
+                    
+                    if (!shouldInclude) {
+                      return // Skip this job
                     }
                     
                     const jobUrl = $el.attr('href') || $el.find('a').attr('href')
@@ -685,47 +794,65 @@ async function scrapeWorkday(keywords: string, location: string): Promise<any[]>
                     // Try to find location and other details
                     const locationText = $el.closest('[data-automation-id="jobPosting"]').find('[data-automation-id="jobLocation"]').text().trim() || location
                     
+                    // Extract description from job listing card (preview)
+                    const jobCard = $el.closest('[data-automation-id="jobPosting"]')
+                    let description = jobCard.find('[data-automation-id="jobDescription"]').text().trim() || ''
+                    
                     // Extract salary from Workday job listing - enhanced patterns
                     let salary = "Salary not specified"
-                    const jobCard = $el.closest('[data-automation-id="jobPosting"]')
                     const salaryText = jobCard.find('[data-automation-id="compensationText"], .salary, .compensation').text().trim()
                     
                     if (salaryText) {
-                      salary = salaryText
-                    } else {
+                      salary = extractSalary(salaryText)
+                    } else if (description) {
                       // Try to extract from description with enhanced patterns
-                      const desc = jobCard.find('[data-automation-id="jobDescription"]').text()
-                      if (desc) {
-                        const descLower = desc.toLowerCase()
-                        const salaryPatterns = [
-                          /\$[\d,]+(?:k|K)?\s*-\s*\$?[\d,]+(?:k|K)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi,
-                          /\$[\d,]+(?:k|K)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi,
-                          /(?:salary|compensation|pay|wage).*?\$[\d,]+(?:-\$?[\d,]+)?/gi,
-                          /\$[\d,]+(?:-\$?[\d,]+)?\s*(?:annually|yearly|per year|per month|per hour|hourly|monthly)/gi
-                        ]
+                      salary = extractSalary(description)
+                    }
+                    
+                    // Fetch full description from job URL if available
+                    if (fullUrl && (!description || description.length < 100)) {
+                      try {
+                        const jobPageResponse = await fetch(fullUrl, {
+                          headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                          }
+                        })
                         
-                        for (const pattern of salaryPatterns) {
-                          const match = descLower.match(pattern)
-                          if (match && match.length > 0) {
-                            salary = match[0].trim()
-                            break
+                        if (jobPageResponse.ok) {
+                          const jobPageHtml = await jobPageResponse.text()
+                          const $jobPage = load(jobPageHtml)
+                          
+                          // Extract full description from Workday job page
+                          const fullDescription = $jobPage.find('[data-automation-id="jobPostingDescription"], .job-description, [data-testid="job-description"]').text().trim() ||
+                                                 $jobPage.find('.jobDescription, .job-description-content').text().trim() ||
+                                                 $jobPage.find('[class*="description"]').first().text().trim()
+                          
+                          if (fullDescription && fullDescription.length > description.length) {
+                            description = fullDescription.substring(0, 2000) // Limit to 2000 chars
                           }
                         }
+                      } catch (err) {
+                        // If fetching fails, use the preview description
+                        console.log(`⚠️ Could not fetch full description from ${fullUrl}: ${err instanceof Error ? err.message : String(err)}`)
                       }
                     }
                     
-                    jobs.push({
-                      id: `workday_${company}_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                      title: title || 'Job Title',
-                      company: company,
-                      location: locationText || 'Location not specified',
-                      posted_date: new Date().toISOString().split('T')[0],
-                      description: null,
-                      url: fullUrl || null,
-                      salary: salary,
-                      job_type: null,
-                    })
+                    if (title && title.length > 0) {
+                      jobs.push({
+                        id: `workday_${company}_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                        title: title || 'Job Title',
+                        company: company,
+                        location: extractLocation(locationText, location || 'Location not specified'),
+                        posted_date: new Date().toISOString().split('T')[0],
+                        description: description || null,
+                        url: fullUrl || null,
+                        salary: salary,
+                        job_type: cleanJobType(null),
+                      })
+                      jobsFoundForCompany++
+                    }
                   } catch (err) {
+                    console.log(`   ⚠️ ${company}: Error parsing job ${i}: ${err instanceof Error ? err.message : String(err)}`)
                     // Skip individual job parsing errors
                   }
                 })()
@@ -739,16 +866,20 @@ async function scrapeWorkday(keywords: string, location: string): Promise<any[]>
                 new Promise(resolve => setTimeout(resolve, 20000)) // 20 second timeout for Workday
               ])
               
+              console.log(`   ✅ ${company}: Processed ${jobsFoundForCompany} jobs from this URL pattern`)
+              
               // If we found jobs, break (don't try other URL pattern)
               if (jobs.length > 0) {
                 break
               }
             }
           } catch (err) {
+            console.log(`   ⚠️ ${company}: Failed to fetch from ${workdayUrl}: ${err instanceof Error ? err.message : String(err)}`)
             continue
           }
         }
       } catch (err) {
+        console.log(`   ⚠️ ${company}: Error processing company: ${err instanceof Error ? err.message : String(err)}`)
         continue
       }
       
