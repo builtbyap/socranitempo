@@ -683,9 +683,12 @@ async function scrapeLever(keywords: string, location: string): Promise<any[]> {
   return jobs
 }
 
-// Scrape Workday (ATS)
+// Scrape Workday (ATS) using Playwright service
 async function scrapeWorkday(keywords: string, location: string): Promise<any[]> {
   const jobs: any[] = []
+  
+  // Fly.io Playwright service URL
+  const FLY_PLAYWRIGHT_SERVICE_URL = Deno.env.get('FLY_PLAYWRIGHT_SERVICE_URL') || 'https://surgeapp-playwright.fly.dev'
   
   try {
     // Workday is more complex - companies use different subdomains
@@ -705,6 +708,7 @@ async function scrapeWorkday(keywords: string, location: string): Promise<any[]>
     
     console.log(`🔍 Workday: Searching ${companiesToSearch.length} companies (of ${workdayCompanies.length} total) with keyword-based filtering: "${keywords || 'all jobs'}"`)
     
+    // Use Playwright service to scrape Workday (handles JavaScript rendering)
     for (const company of companiesToSearch) {
       try {
         // Try common Workday URL patterns
@@ -715,166 +719,87 @@ async function scrapeWorkday(keywords: string, location: string): Promise<any[]>
         
         for (const workdayUrl of workdayUrls) {
           try {
-            const response = await fetch(workdayUrl, {
+            console.log(`   🔍 ${company}: Scraping with Playwright: ${workdayUrl}`)
+            
+            // Call Playwright service to scrape jobs
+            const scrapeResponse = await fetch(`${FLY_PLAYWRIGHT_SERVICE_URL}/scrape`, {
+              method: 'POST',
               headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9'
-              }
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                companyUrl: workdayUrl,
+                keywords: keywords || '',
+                location: location || ''
+              })
             })
             
-            console.log(`   🔍 ${company}: Fetching ${workdayUrl} - Status: ${response.status}`)
+            if (!scrapeResponse.ok) {
+              const errorText = await scrapeResponse.text()
+              console.log(`   ⚠️ ${company}: Playwright service error: ${scrapeResponse.status} - ${errorText}`)
+              continue
+            }
             
-            if (response.ok) {
-              const html = await response.text()
-              const $ = load(html)
+            const scrapeResult = await scrapeResponse.json()
+            
+            if (scrapeResult.success && scrapeResult.jobs && scrapeResult.jobs.length > 0) {
+              console.log(`   ✅ ${company}: Found ${scrapeResult.jobs.length} jobs via Playwright`)
               
-              // Check if we found any job elements
-              const jobElements = $('[data-automation-id="jobTitle"], .job-title, [data-testid="job-title"], [data-automation-id="jobPosting"], a[href*="/jobs/"]')
-              console.log(`   📊 ${company}: Found ${jobElements.length} potential job elements on page`)
-              
-              if (jobElements.length === 0) {
-                console.log(`   ⚠️ ${company}: No job elements found - trying alternative selectors`)
-                // Try to see what's actually on the page
-                const pageText = $('body').text().substring(0, 500)
-                console.log(`   🔍 ${company}: Page preview: ${pageText}`)
-              }
-              
-              // Workday uses specific data attributes and structures
-              const workdayJobPromises: Promise<void>[] = []
-              let jobsFoundForCompany = 0
-              
-              $('[data-automation-id="jobTitle"], .job-title, [data-testid="job-title"], a[href*="/jobs/"]').each((i: number, element: any) => {
-                const jobPromise = (async () => {
+              // Convert Playwright results to our job format
+              for (let i = 0; i < scrapeResult.jobs.length; i++) {
+                const job = scrapeResult.jobs[i]
+                
+                // Fetch full description from job URL if available
+                let description = job.description || ''
+                if (job.url && (!description || description.length < 100)) {
                   try {
-                    const $el = $(element)
-                    const title = $el.text().trim()
-                    
-                    // KEYWORD-BASED FILTERING - very lenient to avoid over-filtering
-                    let shouldInclude = true
-                    if (keywords && keywords.trim().length > 0) {
-                      const jobCard = $el.closest('[data-automation-id="jobPosting"]')
-                      const description = jobCard.find('[data-automation-id="jobDescription"]').text() || ''
-                      const jobText = `${title} ${description} ${company}`.toLowerCase()
-                      const keywordsLower = keywords.toLowerCase()
-                      
-                      // Split keywords by "OR" and check if any match
-                      const keywordParts = keywordsLower.split(/\s+or\s+/).map(k => k.trim())
-                      const matchesKeyword = keywordParts.some(part => {
-                        // Very lenient matching - check if any word from keywords appears in job
-                        const parts = part.split(/\s+/).filter(p => p.length > 2) // Only check words longer than 2 chars
-                        if (parts.length === 0) return true // If no valid parts, include the job
-                        return parts.some(p => jobText.includes(p)) || jobText.includes(part)
-                      })
-                      
-                      // If no keywords match, still include the job if we have very few jobs so far
-                      // This prevents over-filtering when keywords are too specific
-                      if (!matchesKeyword) {
-                        if (jobs.length < 10) {
-                          // Very lenient: include jobs even if they don't match keywords if we have <10 jobs
-                          console.log(`   ℹ️ Including "${title}" despite keyword mismatch (lenient mode: <10 jobs)`)
-                          shouldInclude = true
-                        } else {
-                          shouldInclude = false
-                        }
-                      } else {
-                        shouldInclude = true
+                    const jobPageResponse = await fetch(job.url, {
+                      headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                       }
-                    }
+                    })
                     
-                    if (!shouldInclude) {
-                      return // Skip this job
-                    }
-                    
-                    const jobUrl = $el.attr('href') || $el.find('a').attr('href')
-                    const fullUrl = jobUrl && !jobUrl.startsWith('http') 
-                      ? `${workdayUrl}${jobUrl}` 
-                      : jobUrl
-                    
-                    // Try to find location and other details
-                    const locationText = $el.closest('[data-automation-id="jobPosting"]').find('[data-automation-id="jobLocation"]').text().trim() || location
-                    
-                    // Extract description from job listing card (preview)
-                    const jobCard = $el.closest('[data-automation-id="jobPosting"]')
-                    let description = jobCard.find('[data-automation-id="jobDescription"]').text().trim() || ''
-                    
-                    // Extract salary from Workday job listing - enhanced patterns
-                    let salary = "Salary not specified"
-                    const salaryText = jobCard.find('[data-automation-id="compensationText"], .salary, .compensation').text().trim()
-                    
-                    if (salaryText) {
-                      salary = extractSalary(salaryText)
-                    } else if (description) {
-                      // Try to extract from description with enhanced patterns
-                      salary = extractSalary(description)
-                    }
-                    
-                    // Fetch full description from job URL if available
-                    if (fullUrl && (!description || description.length < 100)) {
-                      try {
-                        const jobPageResponse = await fetch(fullUrl, {
-                          headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                          }
-                        })
-                        
-                        if (jobPageResponse.ok) {
-                          const jobPageHtml = await jobPageResponse.text()
-                          const $jobPage = load(jobPageHtml)
-                          
-                          // Extract full description from Workday job page
-                          const fullDescription = $jobPage.find('[data-automation-id="jobPostingDescription"], .job-description, [data-testid="job-description"]').text().trim() ||
-                                                 $jobPage.find('.jobDescription, .job-description-content').text().trim() ||
-                                                 $jobPage.find('[class*="description"]').first().text().trim()
-                          
-                          if (fullDescription && fullDescription.length > description.length) {
-                            description = fullDescription.substring(0, 2000) // Limit to 2000 chars
-                          }
-                        }
-                      } catch (err) {
-                        // If fetching fails, use the preview description
-                        console.log(`⚠️ Could not fetch full description from ${fullUrl}: ${err instanceof Error ? err.message : String(err)}`)
+                    if (jobPageResponse.ok) {
+                      const jobPageHtml = await jobPageResponse.text()
+                      const $jobPage = load(jobPageHtml)
+                      
+                      // Extract full description from Workday job page
+                      const fullDescription = $jobPage.find('[data-automation-id="jobPostingDescription"], .job-description, [data-testid="job-description"]').text().trim() ||
+                                             $jobPage.find('.jobDescription, .job-description-content').text().trim() ||
+                                             $jobPage.find('[class*="description"]').first().text().trim()
+                      
+                      if (fullDescription && fullDescription.length > description.length) {
+                        description = fullDescription.substring(0, 2000) // Limit to 2000 chars
                       }
-                    }
-                    
-                    if (title && title.length > 0) {
-                      jobs.push({
-                        id: `workday_${company}_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                        title: title || 'Job Title',
-                        company: company,
-                        location: extractLocation(locationText, location || 'Location not specified'),
-                        posted_date: new Date().toISOString().split('T')[0],
-                        description: description || null,
-                        url: fullUrl || null,
-                        salary: salary,
-                        job_type: cleanJobType(null),
-                      })
-                      jobsFoundForCompany++
                     }
                   } catch (err) {
-                    console.log(`   ⚠️ ${company}: Error parsing job ${i}: ${err instanceof Error ? err.message : String(err)}`)
-                    // Skip individual job parsing errors
+                    // If fetching fails, use the preview description
+                    console.log(`⚠️ Could not fetch full description from ${job.url}: ${err instanceof Error ? err.message : String(err)}`)
                   }
-                })()
+                }
                 
-                workdayJobPromises.push(jobPromise)
-              })
-              
-              // Wait for all Workday jobs to be processed
-              await Promise.race([
-                Promise.all(workdayJobPromises),
-                new Promise(resolve => setTimeout(resolve, 20000)) // 20 second timeout for Workday
-              ])
-              
-              console.log(`   ✅ ${company}: Processed ${jobsFoundForCompany} jobs from this URL pattern`)
+                jobs.push({
+                  id: `workday_${company}_${i}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                  title: job.title || 'Job Title',
+                  company: company,
+                  location: extractLocation(job.location, location || 'Location not specified'),
+                  posted_date: new Date().toISOString().split('T')[0],
+                  description: description || null,
+                  url: job.url || null,
+                  salary: extractSalary(job.salary) || 'Salary not specified',
+                  job_type: cleanJobType(job.jobType),
+                })
+              }
               
               // If we found jobs, break (don't try other URL pattern)
               if (jobs.length > 0) {
                 break
               }
+            } else {
+              console.log(`   ℹ️ ${company}: No jobs found via Playwright (${scrapeResult.error || 'no error'})`)
             }
           } catch (err) {
-            console.log(`   ⚠️ ${company}: Failed to fetch from ${workdayUrl}: ${err instanceof Error ? err.message : String(err)}`)
+            console.log(`   ⚠️ ${company}: Failed to scrape with Playwright: ${err instanceof Error ? err.message : String(err)}`)
             continue
           }
         }
@@ -883,7 +808,8 @@ async function scrapeWorkday(keywords: string, location: string): Promise<any[]>
         continue
       }
       
-      await new Promise(resolve => setTimeout(resolve, 200)) // Reduced delay for Workday
+      // Small delay between companies
+      await new Promise(resolve => setTimeout(resolve, 500))
     }
     
     if (jobs.length > 0) {

@@ -840,6 +840,194 @@ async function uploadResume(page, data) {
   }
 }
 
+// Job scraping endpoint (for Workday and other JS-rendered sites)
+app.post('/scrape', async (req, res) => {
+  req.setTimeout(60000); // 60 second timeout for scraping
+  res.setTimeout(60000);
+  
+  let browser = null;
+  let page = null;
+  
+  try {
+    const { companyUrl, keywords, location } = req.body;
+    
+    if (!companyUrl) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required field: companyUrl' 
+      });
+    }
+    
+    console.log(`🔍 Scraping jobs from: ${companyUrl}`);
+    if (keywords) {
+      console.log(`   Keywords: ${keywords}`);
+    }
+    
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    });
+    
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 720 }
+    });
+    
+    page = await context.newPage();
+    
+    console.log(`🌐 Navigating to: ${companyUrl}`);
+    await page.goto(companyUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    
+    // Wait for job listings to load (Workday uses dynamic content)
+    console.log(`⏳ Waiting for job listings to load...`);
+    await page.waitForTimeout(3000); // Wait 3 seconds for JS to render
+    
+    // Try to wait for job elements to appear
+    try {
+      await page.waitForSelector('[data-automation-id="jobTitle"], .job-title, [data-testid="job-title"], a[href*="/jobs/"]', { 
+        timeout: 10000 
+      });
+    } catch (e) {
+      console.log(`⚠️ Job elements not found immediately, continuing anyway...`);
+    }
+    
+    // Scrape jobs from the page
+    const jobs = await page.evaluate((keywords, location) => {
+      const jobList = [];
+      
+      // Try multiple selectors for job titles
+      const jobSelectors = [
+        '[data-automation-id="jobTitle"]',
+        '.job-title',
+        '[data-testid="job-title"]',
+        'a[href*="/jobs/"]',
+        '[data-automation-id="jobPosting"]',
+        '.job-posting',
+        '[class*="job"]'
+      ];
+      
+      let jobElements = [];
+      for (const selector of jobSelectors) {
+        const elements = document.querySelectorAll(selector);
+        if (elements.length > 0) {
+          jobElements = Array.from(elements);
+          console.log(`Found ${elements.length} jobs with selector: ${selector}`);
+          break;
+        }
+      }
+      
+      jobElements.forEach((element, index) => {
+        try {
+          // Get job title
+          const titleElement = element.tagName === 'A' ? element : 
+                              element.querySelector('a, [data-automation-id="jobTitle"], .job-title') || element;
+          const title = titleElement.textContent?.trim() || '';
+          
+          if (!title || title.length < 3) return; // Skip if no title
+          
+          // Get job URL
+          let jobUrl = null;
+          if (element.tagName === 'A') {
+            jobUrl = element.href;
+          } else {
+            const link = element.querySelector('a[href*="/jobs/"], a[href*="/job/"]');
+            if (link) {
+              jobUrl = link.href;
+            } else if (element.href) {
+              jobUrl = element.href;
+            }
+          }
+          
+          // Make URL absolute if relative
+          if (jobUrl && !jobUrl.startsWith('http')) {
+            jobUrl = new URL(jobUrl, window.location.href).href;
+          }
+          
+          // Get job card/parent element for additional info
+          const jobCard = element.closest('[data-automation-id="jobPosting"], .job-posting, [class*="job-card"]') || element.parentElement;
+          
+          // Get location
+          const locationElement = jobCard?.querySelector('[data-automation-id="jobLocation"], .job-location, [class*="location"]');
+          const jobLocation = locationElement?.textContent?.trim() || location || 'Location not specified';
+          
+          // Get description/snippet
+          const descriptionElement = jobCard?.querySelector('[data-automation-id="jobDescription"], .job-description, [class*="description"]');
+          const description = descriptionElement?.textContent?.trim() || '';
+          
+          // Get salary
+          const salaryElement = jobCard?.querySelector('[data-automation-id="compensationText"], .salary, [class*="salary"], [class*="compensation"]');
+          const salary = salaryElement?.textContent?.trim() || 'Salary not specified';
+          
+          // Keyword filtering (lenient)
+          let shouldInclude = true;
+          if (keywords && keywords.trim().length > 0) {
+            const jobText = `${title} ${description}`.toLowerCase();
+            const keywordsLower = keywords.toLowerCase();
+            
+            // Split by "OR" for multiple keywords
+            const keywordParts = keywordsLower.split(/\s+or\s+/).map(k => k.trim());
+            const matchesKeyword = keywordParts.some(part => {
+              const parts = part.split(/\s+/).filter(p => p.length > 2);
+              if (parts.length === 0) return true;
+              return parts.some(p => jobText.includes(p)) || jobText.includes(part);
+            });
+            
+            // Very lenient: include if matches OR if we have very few jobs
+            if (!matchesKeyword && jobList.length >= 10) {
+              shouldInclude = false;
+            }
+          }
+          
+          if (shouldInclude && title) {
+            jobList.push({
+              title: title,
+              company: window.location.hostname.split('.')[0] || 'Unknown',
+              location: jobLocation,
+              description: description.substring(0, 500) || null, // Limit description length
+              url: jobUrl,
+              salary: salary,
+              jobType: null
+            });
+          }
+        } catch (err) {
+          console.error(`Error parsing job ${index}:`, err);
+        }
+      });
+      
+      return jobList;
+    }, keywords || '', location || '');
+    
+    console.log(`✅ Scraped ${jobs.length} jobs from ${companyUrl}`);
+    
+    await browser.close();
+    browser = null;
+    
+    res.json({
+      success: true,
+      jobs: jobs,
+      count: jobs.length
+    });
+    
+  } catch (error) {
+    console.error('❌ Scraping failed:', error);
+    
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.error('Failed to close browser:', closeError);
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      jobs: [],
+      count: 0,
+      error: error.message || String(error)
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Playwright automation service running on port ${PORT}`);
