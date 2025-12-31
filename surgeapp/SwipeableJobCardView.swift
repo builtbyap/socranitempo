@@ -22,7 +22,13 @@ struct SwipeableJobCardView: View {
             ZStack {
                 // Card Background - Fill entire available space
                 // Don't constrain height to allow ScrollView to work properly
-                JobPostCard(post: post, isSaved: false, onToggleSave: {})
+                JobPostCard(
+                    post: post,
+                    isSaved: false,
+                    onToggleSave: {},
+                    onPass: onPass,
+                    onApply: onApply
+                )
                     .frame(width: geometry.size.width)
                     .frame(maxHeight: geometry.size.height)
                     .offset(dragOffset)

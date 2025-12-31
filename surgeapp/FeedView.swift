@@ -85,7 +85,7 @@ struct FeedView: View {
                                                 handleApply(to: post)
                                             },
                                             onPass: {
-                                                handlePass()
+                                                handlePass(for: post)
                                             }
                                         )
                                         .zIndex(Double(filteredJobPosts.count - index))
@@ -207,12 +207,9 @@ struct FeedView: View {
     }
     
     // MARK: - Handle Pass
-    private func handlePass() {
-        // Mark current job as passed/rejected
-        if currentJobIndex < filteredJobPosts.count {
-            let currentJob = filteredJobPosts[currentJobIndex]
-            markJobAsPassed(currentJob)
-        }
+    private func handlePass(for post: JobPost) {
+        // Mark job as passed/rejected (like sorce.jobs)
+        markJobAsPassed(post)
         
         // Move to next job
         moveToNextJob()

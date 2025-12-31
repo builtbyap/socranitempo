@@ -313,6 +313,8 @@ struct JobPostCard: View {
     let isSaved: Bool
     let onToggleSave: () -> Void
     var onSimpleApply: (() -> Void)? = nil
+    var onPass: (() -> Void)? = nil
+    var onApply: (() -> Void)? = nil
     
     @State private var isExpanded = false
     @State private var jobDetails: JobDetails? = nil
@@ -693,8 +695,11 @@ struct JobPostCard: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                         
-                        // Reject button
-                        Button(action: {}) {
+                        // X button (Pass/Deny) - like sorce.jobs
+                        Button(action: {
+                            // Pass/Deny the job
+                            onPass?()
+                        }) {
                             ZStack {
                                 Circle()
                                     .fill(Color.white)
@@ -721,8 +726,11 @@ struct JobPostCard: View {
                         }
                         .buttonStyle(PlainButtonStyle())
                         
-                        // Like/Favorite button
-                        Button(action: {}) {
+                        // Heart button (Apply/Like) - like sorce.jobs
+                        Button(action: {
+                            // Apply to the job
+                            onApply?()
+                        }) {
                             ZStack {
                                 Circle()
                                     .fill(Color.white)
