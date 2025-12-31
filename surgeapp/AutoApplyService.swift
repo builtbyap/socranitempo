@@ -46,21 +46,23 @@ class AutoApplyService {
         }
         
         // Prepare request body
+        var appDataDict: [String: Any] = [
+            "fullName": applicationData.fullName,
+            "email": applicationData.email,
+            "phone": applicationData.phone,
+            "location": applicationData.location,
+            "linkedIn": applicationData.linkedInURL,
+            "github": applicationData.githubURL,
+            "portfolio": applicationData.portfolioURL,
+            "coverLetter": applicationData.coverLetter,
+            "resumeUrl": applicationData.resumeURL ?? ""
+        ]
+        
         var requestBody: [String: Any] = [
             "jobUrl": job.url ?? "",
             "jobTitle": job.title,
             "company": job.company,
-            "applicationData": [
-                "fullName": applicationData.fullName,
-                "email": applicationData.email,
-                "phone": applicationData.phone,
-                "location": applicationData.location ?? "",
-                "linkedIn": applicationData.linkedInURL ?? "",
-                "github": applicationData.githubURL ?? "",
-                "portfolio": applicationData.portfolioURL ?? "",
-                "coverLetter": applicationData.coverLetter,
-                "resumeUrl": applicationData.resumeURL ?? ""
-            ]
+            "applicationData": appDataDict
         ]
         
         // Add base64 resume if available
@@ -128,7 +130,8 @@ class AutoApplyService {
                 description: nil,
                 url: jobUrl,
                 salary: nil,
-                jobType: nil
+                jobType: nil,
+                sections: nil
             ),
             profileData: profileData
         )
@@ -140,21 +143,23 @@ class AutoApplyService {
         }
         
         // Prepare request body with answers
+        var appDataDict: [String: Any] = [
+            "fullName": applicationData.fullName,
+            "email": applicationData.email,
+            "phone": applicationData.phone,
+            "location": applicationData.location,
+            "linkedIn": applicationData.linkedInURL,
+            "github": applicationData.githubURL,
+            "portfolio": applicationData.portfolioURL,
+            "coverLetter": applicationData.coverLetter,
+            "resumeUrl": applicationData.resumeURL ?? ""
+        ]
+        
         var requestBody: [String: Any] = [
             "jobUrl": jobUrl,
             "jobTitle": application.jobTitle,
             "company": application.company,
-            "applicationData": [
-                "fullName": applicationData.fullName,
-                "email": applicationData.email,
-                "phone": applicationData.phone,
-                "location": applicationData.location ?? "",
-                "linkedIn": applicationData.linkedInURL ?? "",
-                "github": applicationData.githubURL ?? "",
-                "portfolio": applicationData.portfolioURL ?? "",
-                "coverLetter": applicationData.coverLetter,
-                "resumeUrl": applicationData.resumeURL ?? ""
-            ],
+            "applicationData": appDataDict,
             "answers": answersDict
         ]
         

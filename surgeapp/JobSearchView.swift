@@ -300,7 +300,8 @@ struct JobSearchView: View {
                 description: "Looking for an experienced software engineer",
                 url: "https://example.com/job/1",
                 salary: "$120k - $150k",
-                jobType: "Full-time"
+                jobType: "Full-time",
+                sections: nil
             )
         ]
         swipeablePosts = jobPosts
@@ -314,102 +315,131 @@ struct JobPostCard: View {
     var onSimpleApply: (() -> Void)? = nil
     
     @State private var isExpanded = false
+    @State private var jobDetails: JobDetails? = nil
+    @State private var isLoadingDetails = false
+    @State private var detailsError: String? = nil
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header Section
-            HStack(alignment: .top, spacing: 12) {
-                // Company Icon/Avatar
-                ZStack {
-                    Circle()
-                        .fill(Color.blue.opacity(0.1))
-                        .frame(width: 50, height: 50)
-                    Image(systemName: "building.2")
-                        .foregroundColor(.blue)
-                        .font(.title3)
-                }
-                
-                // Title and Company
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(post.title)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .lineLimit(2)
+            // Header Section (sorce.jobs style - clean and minimal)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    // Company Avatar (larger, more prominent)
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue.opacity(0.1))
+                            .frame(width: 56, height: 56)
+                        Text(String(post.company.prefix(1)).uppercased())
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundColor(.blue)
+                    }
                     
-                    Text(post.company)
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Job Title (larger, bolder)
+                        Text(post.title)
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundColor(.primary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        
+                        // Company Name
+                        Text(post.company)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    
+                    Spacer()
+                    
+                    // Save Button (top right)
+                    Button(action: onToggleSave) {
+                        Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
+                            .foregroundColor(isSaved ? .blue : .gray)
+                            .font(.system(size: 22))
+                    }
                 }
                 
-                Spacer()
-                
-                // Save Button
-                Button(action: onToggleSave) {
-                    Image(systemName: isSaved ? "bookmark.fill" : "bookmark")
-                        .foregroundColor(isSaved ? .blue : .gray)
-                        .font(.system(size: 20))
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
-            
-            Divider()
-                .padding(.horizontal, 16)
-            
-            // Info Section
-            VStack(alignment: .leading, spacing: 10) {
-                // Location
-                HStack(spacing: 8) {
-                    Image(systemName: "location.fill")
-                        .foregroundColor(.secondary)
-                        .font(.system(size: 14))
-                    Text(post.location)
-                        .font(.system(size: 14))
-                        .foregroundColor(.primary)
-                }
-                
-                // Salary and Job Type Row
+                // Quick Info Row (sorce.jobs style - compact, icon-based)
                 HStack(spacing: 16) {
-                    if let salary = post.salary {
-                        HStack(spacing: 6) {
+                    // Location
+                    HStack(spacing: 4) {
+                        Image(systemName: "mappin.circle.fill")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 14))
+                        Text(post.location)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    // Salary
+                    if let salary = post.salary, salary != "Salary not specified" {
+                        HStack(spacing: 4) {
                             Image(systemName: "dollarsign.circle.fill")
                                 .foregroundColor(.green)
                                 .font(.system(size: 14))
                             Text(salary)
-                                .font(.system(size: 14))
-                                .foregroundColor(.primary)
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundColor(.secondary)
                         }
                     }
                     
-                    if let jobType = post.jobType {
-                        HStack(spacing: 6) {
-                            Image(systemName: "clock.fill")
-                                .foregroundColor(.orange)
-                                .font(.system(size: 14))
-                            Text(jobType)
-                                .font(.system(size: 14))
-                                .foregroundColor(.primary)
-                        }
+                    // Posted Date
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.fill")
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 12))
+                        Text(formatDate(post.postedDate))
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundColor(.secondary)
                     }
                 }
-                
-                // Posted Date
-                HStack(spacing: 6) {
-                    Image(systemName: "calendar")
-                        .foregroundColor(.secondary)
-                        .font(.system(size: 12))
-                    Text("Posted \(formatDate(post.postedDate))")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+            .padding(.bottom, 20)
             
-            Divider()
-                .padding(.horizontal, 16)
+            // Job Description Section (always visible with fade-out, like sorce.jobs)
+            if let description = post.description, !description.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Scrollable description with fade-out gradient
+                    GeometryReader { geometry in
+                        ZStack(alignment: .bottom) {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(description)
+                                        .font(.system(size: 15))
+                                        .foregroundColor(.primary)
+                                        .lineSpacing(6)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .padding(.horizontal, 20)
+                                        .padding(.bottom, 100) // Extra padding for gradient overlay
+                                }
+                            }
+                            
+                            // Fade-out gradient at bottom (like sorce.jobs)
+                            VStack {
+                                Spacer()
+                                LinearGradient(
+                                    gradient: Gradient(colors: [
+                                        Color(.systemBackground).opacity(0),
+                                        Color(.systemBackground).opacity(0.3),
+                                        Color(.systemBackground).opacity(0.6),
+                                        Color(.systemBackground)
+                                    ]),
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                                .frame(height: 100)
+                            }
+                            .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(maxHeight: .infinity) // Fill available space
+                }
+            } else {
+                // If no description, add spacer to push buttons to bottom
+                Spacer()
+            }
             
             // Expanded Details Section (sorce.jobs style)
             if isExpanded {
@@ -418,24 +448,66 @@ struct JobPostCard: View {
                         .padding(.horizontal, 16)
                     
                     VStack(alignment: .leading, spacing: 20) {
-                        // Job Description Section
-                        if let description = post.description, !description.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("About this role")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundColor(.primary)
-                                
-                                ScrollView {
-                                    Text(description)
-                                        .font(.system(size: 15))
-                                        .foregroundColor(.primary)
-                                        .lineSpacing(4)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                .frame(maxHeight: 300)
+                        // Job Details from URL (fetched when View Job is pressed)
+                        if isLoadingDetails {
+                            HStack {
+                                Spacer()
+                                ProgressView()
+                                    .padding()
+                                Spacer()
+                            }
+                        } else if let error = detailsError {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Unable to load job details")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.red)
+                                Text(error)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.secondary)
                             }
                             .padding(.horizontal, 16)
-                            .padding(.top, 20)
+                            .padding(.vertical, 12)
+                        } else if let details = jobDetails {
+                            if details.sections.isEmpty {
+                                // No sections found
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("No additional information available")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                            } else {
+                                // Display sections
+                                VStack(alignment: .leading, spacing: 16) {
+                                    Text("Job Information")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundColor(.primary)
+                                        .padding(.horizontal, 20)
+                                        .padding(.top, 20)
+                                    
+                                    ForEach(details.sections) { section in
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text(section.title)
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundColor(.primary)
+                                            
+                                            Text(section.content)
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.secondary)
+                                                .lineSpacing(4)
+                                        }
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 12)
+                                        
+                                        if section.id != details.sections.last?.id {
+                                            Divider()
+                                                .padding(.horizontal, 20)
+                                        }
+                                    }
+                                }
+                                .padding(.bottom, 12)
+                            }
                         }
                         
                         // Key Information Grid
@@ -594,57 +666,73 @@ struct JobPostCard: View {
                 ))
             }
             
-            // Action Buttons
-            VStack(spacing: 12) {
-                // Simple Apply Button
-                if let onSimpleApply = onSimpleApply {
-                    Button(action: onSimpleApply) {
+            // Action Buttons (sorce.jobs style - fixed at bottom)
+            VStack(spacing: 0) {
+                // Divider above buttons
+                Divider()
+                    .padding(.horizontal, 20)
+                
+                VStack(spacing: 12) {
+                    // Simple Apply Button (if available)
+                    if let onSimpleApply = onSimpleApply {
+                        Button(action: onSimpleApply) {
+                            HStack {
+                                Spacer()
+                                Image(systemName: "paperplane.fill")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("Simple Apply")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Spacer()
+                            }
+                            .foregroundColor(.white)
+                            .padding(.vertical, 16)
+                            .background(Color.green)
+                            .cornerRadius(12)
+                        }
+                    }
+                    
+                    // View Job Button (Toggle Expansion and Fetch Details)
+                    Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                            if !isExpanded {
+                                // Expanding - fetch job details
+                                isExpanded = true
+                                fetchJobDetails()
+                            } else {
+                                // Collapsing
+                                isExpanded = false
+                            }
+                        }
+                    }) {
                         HStack {
                             Spacer()
-                            Image(systemName: "paperplane.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                            Text("Simple Apply")
-                                .font(.system(size: 16, weight: .semibold))
+                            if isLoadingDetails {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                            } else {
+                                Text(isExpanded ? "Hide Details" : "View Job")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
                             Spacer()
                         }
                         .foregroundColor(.white)
-                        .padding(.vertical, 14)
-                        .background(Color.green)
-                        .cornerRadius(10)
+                        .padding(.vertical, 16)
+                        .background(Color.blue)
+                        .cornerRadius(12)
                     }
                 }
-                
-                // View Job Button (Toggle Expansion)
-                Button(action: {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                        isExpanded.toggle()
-                    }
-                }) {
-                    HStack {
-                        Spacer()
-                        Text(isExpanded ? "Hide Details" : "View Job")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
-                        Spacer()
-                    }
-                    .padding(.vertical, 14)
-                    .background(Color.blue)
-                    .cornerRadius(10)
-                }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 20)
+                .background(Color(.systemBackground))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color(.systemGray5), lineWidth: 0.5)
-        )
+        .cornerRadius(20)
+        .shadow(color: Color.black.opacity(0.1), radius: 12, x: 0, y: 4)
     }
     
     private func formatDate(_ dateString: String) -> String {
@@ -666,6 +754,41 @@ struct JobPostCard: View {
             }
         }
         return dateString
+    }
+    
+    // MARK: - Fetch Job Details
+    private func fetchJobDetails() {
+        guard let jobUrl = post.url, !jobUrl.isEmpty else {
+            detailsError = "No job URL available"
+            isLoadingDetails = false
+            return
+        }
+        
+        // Don't fetch again if we already have details
+        if jobDetails != nil {
+            return
+        }
+        
+        print("🔄 Fetching job details for: \(jobUrl)")
+        isLoadingDetails = true
+        detailsError = nil
+        
+        Task {
+            do {
+                let details = try await JobDetailsService.shared.fetchJobDetails(from: jobUrl)
+                print("✅ Successfully fetched \(details.sections.count) sections")
+                await MainActor.run {
+                    self.jobDetails = details
+                    self.isLoadingDetails = false
+                }
+            } catch {
+                print("❌ Failed to fetch job details: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.isLoadingDetails = false
+                    self.detailsError = error.localizedDescription
+                }
+            }
+        }
     }
 }
 

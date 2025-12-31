@@ -18,6 +18,7 @@ struct JobPost: Identifiable, Codable {
     let url: String?
     let salary: String?
     let jobType: String?
+    let sections: [JobSection]? // Structured sections like "What you'll do", "Requirements", etc.
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -29,6 +30,66 @@ struct JobPost: Identifiable, Codable {
         case url
         case salary
         case jobType = "job_type"
+        case sections
+    }
+    
+    // Regular initializer
+    init(
+        id: String,
+        title: String,
+        company: String,
+        location: String,
+        postedDate: String,
+        description: String?,
+        url: String?,
+        salary: String?,
+        jobType: String?,
+        sections: [JobSection]?
+    ) {
+        self.id = id
+        self.title = title
+        self.company = company
+        self.location = location
+        self.postedDate = postedDate
+        self.description = description
+        self.url = url
+        self.salary = salary
+        self.jobType = jobType
+        self.sections = sections
+    }
+    
+    // Custom decoder to handle missing or invalid sections gracefully
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        company = try container.decode(String.self, forKey: .company)
+        location = try container.decode(String.self, forKey: .location)
+        postedDate = try container.decode(String.self, forKey: .postedDate)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        salary = try container.decodeIfPresent(String.self, forKey: .salary)
+        jobType = try container.decodeIfPresent(String.self, forKey: .jobType)
+        
+        // Gracefully handle sections - if it fails to decode, set to nil
+        if let sectionsData = try? container.decodeIfPresent([JobSection].self, forKey: .sections) {
+            sections = sectionsData
+        } else {
+            sections = nil
+        }
+    }
+}
+
+// MARK: - Job Section Model
+struct JobSection: Identifiable, Codable {
+    let id: String
+    let title: String
+    let content: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case content
     }
 }
 

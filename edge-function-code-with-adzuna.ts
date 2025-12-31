@@ -182,16 +182,22 @@ serve(async (req) => {
     })
     
     console.log(`📊 Final job count: ${uniqueJobs.length} real jobs (all test data filtered out)`)
-
+    
+    // Skip section extraction for now to avoid timeout/parsing issues
+    // Sections can be extracted on-demand when viewing a specific job
+    // This ensures the main job feed loads quickly
+    console.log('ℹ️ Skipping section extraction to ensure fast response (can be added later)')
+    const allJobsWithSections = uniqueJobs
+    
     // Don't filter by career interests again - we already filtered during scraping
     // This was causing double filtering and removing too many jobs
-    let filteredJobs = uniqueJobs
+    let filteredJobs = allJobsWithSections
     
     // Only apply career interests filter if we have way too many jobs (>100)
     // Otherwise, return all unique jobs
-    if (careerInterests.length > 0 && uniqueJobs.length > 100) {
-      console.log(`📊 Applying career interests filter (${uniqueJobs.length} jobs, threshold: 100)`)
-      filteredJobs = uniqueJobs.filter(job => {
+    if (careerInterests.length > 0 && allJobsWithSections.length > 100) {
+      console.log(`📊 Applying career interests filter (${allJobsWithSections.length} jobs, threshold: 100)`)
+      filteredJobs = allJobsWithSections.filter(job => {
         const jobText = `${job.title} ${job.company} ${job.description || ''}`.toLowerCase()
         return careerInterests.some(interest => {
           const interestLower = interest.toLowerCase()
@@ -202,13 +208,14 @@ serve(async (req) => {
       
       // If filtering resulted in too few jobs, return all jobs
       if (filteredJobs.length < 10) {
-        console.log(`⚠️ Career interests filter too strict (${filteredJobs.length} jobs), returning all ${uniqueJobs.length} jobs`)
-        filteredJobs = uniqueJobs
+        console.log(`⚠️ Career interests filter too strict (${filteredJobs.length} jobs), returning all ${allJobsWithSections.length} jobs`)
+        filteredJobs = allJobsWithSections
       } else {
-        console.log(`✅ Career interests filter: ${uniqueJobs.length} → ${filteredJobs.length} jobs`)
+        console.log(`✅ Career interests filter: ${allJobsWithSections.length} → ${filteredJobs.length} jobs`)
       }
     } else {
-      console.log(`ℹ️ Skipping career interests filter (${uniqueJobs.length} jobs, threshold: 100)`)
+      console.log(`ℹ️ Skipping career interests filter (${allJobsWithSections.length} jobs, threshold: 100)`)
+      filteredJobs = allJobsWithSections
     }
 
     return new Response(
@@ -1352,6 +1359,113 @@ function getSampleJobs(location: string): any[] {
   ]
 }
 */
+
+// Extract structured sections from job post URL (like "What you'll do", "Requirements", etc.)
+async function extractJobSections(jobUrl: string | null): Promise<any[] | null> {
+  if (!jobUrl) {
+    return null
+  }
+  
+  try {
+    const response = await fetch(jobUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      }
+    })
+    
+    if (!response.ok) {
+      return null
+    }
+    
+    const html = await response.text()
+    const $ = load(html)
+    
+    const sections: any[] = []
+    
+    // Common section title patterns
+    const sectionPatterns = [
+      /what\s+you'?ll\s+do/i,
+      /what\s+you'?ll\s+work\s+on/i,
+      /responsibilities/i,
+      /requirements/i,
+      /qualifications/i,
+      /what\s+we'?re\s+looking\s+for/i,
+      /key\s+responsibilities/i,
+      /essential\s+qualifications/i,
+      /preferred\s+qualifications/i,
+      /benefits/i,
+      /perks/i,
+      /about\s+the\s+role/i,
+      /about\s+the\s+team/i
+    ]
+    
+    // Try to find sections by common headings
+    $('h2, h3, h4, .section-title, [class*="section"], [class*="heading"]').each((i: number, element: any) => {
+      const $el = $(element)
+      const title = $el.text().trim()
+      
+      // Check if this heading matches any section pattern
+      const matchesPattern = sectionPatterns.some(pattern => pattern.test(title))
+      
+      if (matchesPattern && title.length < 100) {
+        // Find the content after this heading
+        let content = ''
+        let nextElement = $el.next()
+        
+        // Collect content until we hit another heading or section
+        while (nextElement.length > 0 && 
+               !nextElement.is('h1, h2, h3, h4, h5, h6') &&
+               content.length < 2000) {
+          const text = nextElement.text().trim()
+          if (text) {
+            content += text + ' '
+          }
+          nextElement = nextElement.next()
+        }
+        
+        // Also try to find content in parent container
+        if (!content) {
+          const parent = $el.parent()
+          const siblings = parent.find('p, li, div').not('h1, h2, h3, h4, h5, h6')
+          content = siblings.text().trim().substring(0, 2000)
+        }
+        
+        if (content.trim().length > 20) {
+          sections.push({
+            id: `section_${i}_${Date.now()}`,
+            title: title,
+            content: content.trim().substring(0, 1000) // Limit content length
+          })
+        }
+      }
+    })
+    
+    // If no sections found with patterns, try to find common section structures
+    if (sections.length === 0) {
+      // Look for divs with common class names
+      $('[class*="section"], [class*="requirement"], [class*="responsibility"]').each((i: number, element: any) => {
+        const $el = $(element)
+        const titleEl = $el.find('h2, h3, h4, strong').first()
+        const title = titleEl.text().trim()
+        const content = $el.find('p, li, div').not('h1, h2, h3, h4, h5, h6').text().trim()
+        
+        if (title && content && content.length > 20 && content.length < 2000) {
+          sections.push({
+            id: `section_${i}_${Date.now()}`,
+            title: title.substring(0, 100),
+            content: content.substring(0, 1000)
+          })
+        }
+      })
+    }
+    
+    return sections.length > 0 ? sections : null
+  } catch (error) {
+    console.error('Error extracting job sections:', error)
+    return null
+  }
+}
 
 // Deduplicate jobs based on title, company, and location
 function deduplicateJobs(jobs: any[]): any[] {

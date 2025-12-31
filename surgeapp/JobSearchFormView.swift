@@ -172,7 +172,8 @@ struct JobSearchFormView: View {
                     description: result.jobDescription,
                     url: result.applyUrl,
                     salary: formatSalary(result.salaryRange, min: minimumSalary, max: maximumSalary),
-                    jobType: result.employmentType ?? (jobType == "F" ? "Full-time" : "Part-time")
+                    jobType: result.employmentType ?? (jobType == "F" ? "Full-time" : "Part-time"),
+                    sections: nil
                 )
             }
             

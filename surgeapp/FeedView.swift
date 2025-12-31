@@ -94,7 +94,7 @@ struct FeedView: View {
                         } else {
                             GeometryReader { geometry in
                                 ZStack {
-                                    // Show up to 3 cards stacked (top card visible, others behind)
+                                    // Show up to 3 cards stacked (sorce.jobs style - subtle stacking)
                                     ForEach(Array(filteredJobPosts.enumerated()), id: \.element.id) { index, post in
                                         if index >= currentJobIndex && index < currentJobIndex + 3 {
                                             SwipeableJobCardView(
@@ -107,16 +107,17 @@ struct FeedView: View {
                                                 }
                                             )
                                             .zIndex(Double(filteredJobPosts.count - index))
-                                            .offset(y: CGFloat(index - currentJobIndex) * 8)
-                                            .scaleEffect(1.0 - CGFloat(index - currentJobIndex) * 0.03)
-                                            .opacity(index == currentJobIndex ? 1.0 : 0.95)
+                                            .offset(y: CGFloat(index - currentJobIndex) * 6) // Subtle offset
+                                            .scaleEffect(1.0 - CGFloat(index - currentJobIndex) * 0.02) // Subtle scale
+                                            .opacity(index == currentJobIndex ? 1.0 : max(0.7, 1.0 - CGFloat(index - currentJobIndex) * 0.15))
                                         }
                                     }
                                 }
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 20)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 8)
+                        }
                     } else if selectedTab == 1 {
                         // LinkedIn Feed
                         ScrollView {

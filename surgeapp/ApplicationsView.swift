@@ -185,21 +185,23 @@ struct ApplicationsView: View {
                             }
                             
                             // Jobs You Passed On
-                            if !passedApplications.isEmpty {
-                                SectionRow(
-                                    icon: "hand.thumbsup.fill",
-                                    title: "Jobs you passed on",
-                                    count: passedApplications.count
-                                ) {
-                                    selectedSection = .passed
-                                }
-                            } else {
-                                SectionRow(
-                                    icon: "hand.thumbsup.fill",
-                                    title: "Jobs you passed on",
-                                    count: 0
-                                ) {
-                                    // No passed jobs yet
+                            Group {
+                                if !passedApplications.isEmpty {
+                                    SectionRow(
+                                        icon: "hand.thumbsup.fill",
+                                        title: "Jobs you passed on",
+                                        count: passedApplications.count
+                                    ) {
+                                        selectedSection = .passed
+                                    }
+                                } else {
+                                    SectionRow(
+                                        icon: "hand.thumbsup.fill",
+                                        title: "Jobs you passed on",
+                                        count: 0
+                                    ) {
+                                        // No passed jobs yet
+                                    }
                                 }
                             }
                             .overlay(

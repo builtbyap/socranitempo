@@ -20,39 +20,42 @@ struct SwipeableJobCardView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                // Card Background
+                // Card Background - Fill entire available space
                 JobPostCard(post: post, isSaved: false, onToggleSave: {})
+                    .frame(width: geometry.size.width, height: geometry.size.height)
                     .offset(dragOffset)
                     .rotationEffect(.degrees(rotation))
-                    .opacity(dragOffset.width == 0 ? 1.0 : 0.95)
+                    .opacity(1.0 - min(abs(dragOffset.width) / (geometry.size.width * 0.5), 0.1))
+                    .scaleEffect(1.0 - min(abs(dragOffset.width) / (geometry.size.width * 2), 0.05))
                     .gesture(
                         DragGesture()
                             .onChanged { value in
                                 dragOffset = value.translation
-                                rotation = Double(value.translation.width / 20)
+                                // Smoother rotation (sorce.jobs style)
+                                rotation = Double(value.translation.width / 15)
                             }
                             .onEnded { value in
                                 if value.translation.width > swipeThreshold {
                                     // Swipe right - Apply
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                        dragOffset = CGSize(width: geometry.size.width * 2, height: 0)
-                                        rotation = 30
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                        dragOffset = CGSize(width: geometry.size.width * 2.5, height: 0)
+                                        rotation = 25
                                     }
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                                         onApply()
                                     }
                                 } else if value.translation.width < -swipeThreshold {
                                     // Swipe left - Pass
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                                        dragOffset = CGSize(width: -geometry.size.width * 2, height: 0)
-                                        rotation = -30
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                        dragOffset = CGSize(width: -geometry.size.width * 2.5, height: 0)
+                                        rotation = -25
                                     }
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                                         onPass()
                                     }
                                 } else {
-                                    // Snap back
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                    // Snap back (sorce.jobs style - smooth spring)
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
                                         dragOffset = .zero
                                         rotation = 0
                                     }
@@ -60,36 +63,38 @@ struct SwipeableJobCardView: View {
                             }
                     )
                 
-                // Swipe Indicators
-                if abs(dragOffset.width) > 20 {
+                // Swipe Indicators (sorce.jobs style - subtle and clean)
+                if abs(dragOffset.width) > 30 {
                     VStack {
                         Spacer()
                         HStack {
                             if dragOffset.width > 0 {
                                 // Swipe right - Apply
-                                VStack {
+                                VStack(spacing: 8) {
                                     Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 60))
+                                        .font(.system(size: 64))
                                         .foregroundColor(.green)
                                     Text("APPLY")
-                                        .font(.system(size: 24, weight: .bold))
+                                        .font(.system(size: 20, weight: .bold))
                                         .foregroundColor(.green)
                                 }
                                 .opacity(min(abs(dragOffset.width) / swipeThreshold, 1.0))
+                                .scaleEffect(min(abs(dragOffset.width) / swipeThreshold, 1.0))
                             } else {
                                 // Swipe left - Pass
-                                VStack {
+                                VStack(spacing: 8) {
                                     Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 60))
+                                        .font(.system(size: 64))
                                         .foregroundColor(.red)
                                     Text("PASS")
-                                        .font(.system(size: 24, weight: .bold))
+                                        .font(.system(size: 20, weight: .bold))
                                         .foregroundColor(.red)
                                 }
                                 .opacity(min(abs(dragOffset.width) / swipeThreshold, 1.0))
+                                .scaleEffect(min(abs(dragOffset.width) / swipeThreshold, 1.0))
                             }
                         }
-                        .padding(.bottom, 100)
+                        .padding(.bottom, 120)
                     }
                 }
             }
@@ -108,7 +113,8 @@ struct SwipeableJobCardView: View {
             description: "Looking for an experienced software engineer",
             url: "https://example.com/job/1",
             salary: "$120k - $150k",
-            jobType: "Full-time"
+            jobType: "Full-time",
+            sections: nil
         ),
         onApply: {},
         onPass: {}

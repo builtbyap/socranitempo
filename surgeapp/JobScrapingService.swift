@@ -437,16 +437,43 @@ class JobScrapingService {
             switch decodingError {
             case .typeMismatch(let type, let context):
                 print("   Type mismatch: Expected \(type), found at \(context.codingPath)")
+                print("   Context: \(context.debugDescription)")
             case .valueNotFound(let type, let context):
                 print("   Value not found: Expected \(type) at \(context.codingPath)")
+                print("   Context: \(context.debugDescription)")
             case .keyNotFound(let key, let context):
                 print("   Key not found: \(key.stringValue) at \(context.codingPath)")
+                // If it's the sections key, that's okay - it's optional
+                if key.stringValue == "sections" {
+                    print("   ⚠️ Note: 'sections' is optional, attempting to decode without it...")
+                    // Try decoding with a custom decoder that ignores missing sections
+                    do {
+                        let decoder = JSONDecoder()
+                        decoder.keyDecodingStrategy = .convertFromSnakeCase
+                        // Try to decode manually, skipping sections if missing
+                        if let jsonArray = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                            let jobs = try jsonArray.map { json -> JobPost in
+                                var jobDict = json
+                                // Remove sections if it's not in the expected format
+                                if let sectionsValue = jobDict["sections"], !(sectionsValue is [[String: Any]]) {
+                                    jobDict.removeValue(forKey: "sections")
+                                }
+                                let jobData = try JSONSerialization.data(withJSONObject: jobDict)
+                                return try decoder.decode(JobPost.self, from: jobData)
+                            }
+                            print("✅ Successfully decoded \(jobs.count) jobs (ignoring invalid sections)")
+                            return jobs
+                        }
+                    } catch {
+                        print("   ⚠️ Failed to decode with sections workaround: \(error)")
+                    }
+                }
             case .dataCorrupted(let context):
                 print("   Data corrupted: \(context.debugDescription)")
             @unknown default:
                 print("   Unknown decoding error: \(decodingError)")
             }
-            print("❌ Full response: \(String(data: data, encoding: .utf8) ?? "Unable to decode")")
+            print("❌ Full response (first 2000 chars): \(String(data: data, encoding: .utf8)?.prefix(2000) ?? "Unable to decode")")
             throw JobScrapingError.parsingFailed
         } catch {
             print("❌ Failed to decode jobs: \(error)")
