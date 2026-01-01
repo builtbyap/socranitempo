@@ -320,6 +320,8 @@ struct JobPostCard: View {
     @State private var jobDetails: JobDetails? = nil
     @State private var isLoadingDetails = false
     @State private var detailsError: String? = nil
+    @State private var jobDescriptionSummary: JobDescriptionSummary? = nil
+    @State private var isSummarizingDescription = false
     
     var body: some View {
         return GeometryReader { geometry in
@@ -393,15 +395,12 @@ struct JobPostCard: View {
                             
                             // Company Logo and Name (sorce.jobs style)
                             HStack(spacing: 12) {
-                                // Company Logo (black circle with white letter)
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.black)
-                                        .frame(width: 48, height: 48)
-                                    Text(String(post.company.prefix(1)).uppercased())
-                                        .font(.system(size: 20, weight: .bold))
-                                        .foregroundColor(.white)
-                                }
+                                // Company Logo (fetched from Clearbit API)
+                                CompanyLogoView(
+                                    companyName: post.company,
+                                    jobUrl: post.url,
+                                    size: 48
+                                )
                                 
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(post.company)
@@ -431,7 +430,7 @@ struct JobPostCard: View {
                                     .foregroundColor(.secondary)
                                 
                                 HStack(spacing: 8) {
-                                    // Remote badge
+                                    // Remote info bubble
                                     if isRemoteJob(post: post) {
                                         HStack(spacing: 4) {
                                             Image(systemName: "globe")
@@ -443,6 +442,21 @@ struct JobPostCard: View {
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 6)
                                         .background(Color.teal.opacity(0.1))
+                                        .cornerRadius(16)
+                                    }
+                                    
+                                    // Internship info bubble
+                                    if isInternship(post: post) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "graduationcap.fill")
+                                                .font(.system(size: 11))
+                                            Text("Internship")
+                                                .font(.system(size: 13, weight: .medium))
+                                        }
+                                        .foregroundColor(.orange)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 6)
+                                        .background(Color.orange.opacity(0.1))
                                         .cornerRadius(16)
                                     }
                                     
@@ -539,20 +553,70 @@ struct JobPostCard: View {
                             .padding(.horizontal, 20)
                             .padding(.bottom, 16)
                             
-                            // Job Description Section (sorce.jobs style - always visible, full text)
+                            // Job Description Section (AI-summarized with bullet points and subcategories)
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Job description")
                                     .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(.secondary)
                                 
                                 if let description = post.description, !description.isEmpty {
-                                    Text(description)
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.primary)
-                                        .lineSpacing(4)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .multilineTextAlignment(.leading)
-                                        .fixedSize(horizontal: false, vertical: true)
+                                    if let summary = jobDescriptionSummary {
+                                        // Show AI-summarized format
+                                        VStack(alignment: .leading, spacing: 16) {
+                                            // Summary overview
+                                            if !summary.summary.isEmpty {
+                                                Text(summary.summary)
+                                                    .font(.system(size: 14))
+                                                    .foregroundColor(.primary)
+                                                    .lineSpacing(4)
+                                                    .padding(.bottom, 8)
+                                            }
+                                            
+                                            // Categories with bullet points
+                                            ForEach(summary.categories, id: \.title) { category in
+                                                VStack(alignment: .leading, spacing: 8) {
+                                                    Text(category.title)
+                                                        .font(.system(size: 15, weight: .semibold))
+                                                        .foregroundColor(.primary)
+                                                        .padding(.bottom, 4)
+                                                    
+                                                    ForEach(category.items, id: \.self) { item in
+                                                        HStack(alignment: .top, spacing: 8) {
+                                                            Text("•")
+                                                                .font(.system(size: 14, weight: .medium))
+                                                                .foregroundColor(.secondary)
+                                                                .padding(.top, 2)
+                                                            
+                                                            Text(item)
+                                                                .font(.system(size: 14))
+                                                                .foregroundColor(.primary)
+                                                                .lineSpacing(3)
+                                                                .fixedSize(horizontal: false, vertical: true)
+                                                        }
+                                                    }
+                                                }
+                                                .padding(.bottom, 8)
+                                            }
+                                        }
+                                    } else if isSummarizingDescription {
+                                        // Show loading state while summarizing
+                                        HStack(spacing: 8) {
+                                            ProgressView()
+                                                .scaleEffect(0.8)
+                                            Text("Summarizing job description...")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.secondary)
+                                        }
+                                    } else {
+                                        // Fallback to original description if summarization fails
+                                        Text(description)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.primary)
+                                            .lineSpacing(4)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
                                 } else {
                                     // Show placeholder if no description available
                                     Text("No description available")
@@ -563,6 +627,17 @@ struct JobPostCard: View {
                             }
                             .padding(.horizontal, 20)
                             .padding(.bottom, 20)
+                            .onAppear {
+                                // Trigger AI summarization when description appears
+                                if let description = post.description, 
+                                   !description.isEmpty, 
+                                   jobDescriptionSummary == nil,
+                                   !isSummarizingDescription {
+                                    Task {
+                                        await summarizeJobDescription(description)
+                                    }
+                                }
+                            }
                             
                             // Qualifications Section (always visible below description)
                             if let details = jobDetails {
@@ -835,6 +910,18 @@ struct JobPostCard: View {
                remoteKeywords.contains { titleLower.contains($0) }
     }
     
+    private func isInternship(post: JobPost) -> Bool {
+        let titleLower = post.title.lowercased()
+        let descriptionLower = post.description?.lowercased() ?? ""
+        let jobTypeLower = post.jobType?.lowercased() ?? ""
+        
+        let internshipKeywords = ["intern", "internship", "co-op", "coop", "trainee", "apprentice"]
+        
+        return internshipKeywords.contains { titleLower.contains($0) } ||
+               internshipKeywords.contains { descriptionLower.contains($0) } ||
+               internshipKeywords.contains { jobTypeLower.contains($0) }
+    }
+    
     private func buildInfoBubbles(for post: JobPost) -> [BubbleInfo] {
         var bubbles: [BubbleInfo] = []
         
@@ -887,75 +974,116 @@ struct JobPostCard: View {
     }
     
     private func cleanSalaryText(_ salary: String) -> String {
-        // Clean up salary text - remove extra whitespace, normalize format
+        // AI-enhanced salary cleaning - simplifies and normalizes salary text
         var cleaned = salary.trimmingCharacters(in: .whitespacesAndNewlines)
         
         // Remove common prefixes
-        let prefixes = ["Salary:", "Compensation:", "Pay:", "Wage:"]
+        let prefixes = ["Salary:", "Compensation:", "Pay:", "Wage:", "Base:", "Total:", "Package:"]
         for prefix in prefixes {
             if cleaned.lowercased().hasPrefix(prefix.lowercased()) {
                 cleaned = String(cleaned.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
         
-        // Convert to "k" notation (thousands) - simplify format
-        // Pattern: Extract numbers and convert to k notation
-        let numberPattern = #"(\d{1,3}(?:,\d{3})*(?:k|K)?)"#
-        if let regex = try? NSRegularExpression(pattern: numberPattern, options: []) {
+        // Check if already in proper range format (e.g., "$100k - $150k")
+        let rangePattern = #"\$(\d+)k\s*[-–—]\s*\$(\d+)k"#
+        if let rangeRegex = try? NSRegularExpression(pattern: rangePattern, options: []),
+           let match = rangeRegex.firstMatch(in: cleaned, options: [], range: NSRange(location: 0, length: cleaned.utf16.count)),
+           match.numberOfRanges >= 3 {
             let nsString = cleaned as NSString
-            let results = regex.matches(in: cleaned, options: [], range: NSRange(location: 0, length: nsString.length))
-            
-            var convertedSalary = cleaned
-            // Replace in reverse order to maintain indices
-            for match in results.reversed() {
-                let matchString = nsString.substring(with: match.range)
-                var value = Int(matchString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "k", with: "", options: .caseInsensitive)) ?? 0
-                
-                // If it didn't have "k" and is > 1000, convert to thousands
-                if !matchString.lowercased().contains("k") && value > 1000 {
-                    value = value / 1000
+            if let minStr = Range(match.range(at: 1), in: cleaned),
+               let maxStr = Range(match.range(at: 2), in: cleaned),
+               let min = Int(String(cleaned[minStr])),
+               let max = Int(String(cleaned[maxStr])) {
+                // Already in range format, ensure min < max
+                if min == max {
+                    return "$\(min)k"
+                } else if min < max {
+                    return "$\(min)k - $\(max)k"
+                } else {
+                    return "$\(max)k - $\(min)k" // Swap if reversed
                 }
-                
-                // Check if hourly or monthly (convert to annual)
-                let isHourly = cleaned.lowercased().contains("hour") || cleaned.lowercased().contains("hr") || cleaned.lowercased().contains("hourly")
-                let isMonthly = cleaned.lowercased().contains("month") || cleaned.lowercased().contains("mo") || cleaned.lowercased().contains("monthly")
-                
-                if isHourly {
-                    // Rough conversion: $50/hr ≈ $100k/year
-                    value = value * 2
-                } else if isMonthly {
-                    // Convert monthly to annual thousands
-                    value = (value * 12) / 1000
-                }
-                
-                // Replace with k notation
-                let replacement = "$\(value)k"
-                convertedSalary = (convertedSalary as NSString).replacingCharacters(in: match.range, with: replacement)
             }
-            cleaned = convertedSalary
         }
         
-        // Normalize common abbreviations and clean up
-        cleaned = cleaned.replacingOccurrences(of: "per year", with: "", options: .caseInsensitive)
-        cleaned = cleaned.replacingOccurrences(of: "per month", with: "", options: .caseInsensitive)
-        cleaned = cleaned.replacingOccurrences(of: "per hour", with: "", options: .caseInsensitive)
-        cleaned = cleaned.replacingOccurrences(of: "annually", with: "", options: .caseInsensitive)
-        cleaned = cleaned.replacingOccurrences(of: "monthly", with: "", options: .caseInsensitive)
-        cleaned = cleaned.replacingOccurrences(of: "hourly", with: "", options: .caseInsensitive)
-        
-        // Clean up extra spaces and dashes
-        cleaned = cleaned.replacingOccurrences(of: "  ", with: " ")
-        cleaned = cleaned.replacingOccurrences(of: " - ", with: " - ")
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        // Handle "+" notation (e.g., "$100k+" stays as "$100k+")
-        // Handle "up to" notation (e.g., "up to $150k" becomes "$150k")
-        if cleaned.lowercased().contains("up to") {
-            cleaned = cleaned.replacingOccurrences(of: "up to", with: "", options: .caseInsensitive).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Extract all numbers and convert to "k" notation
+        let numberPattern = #"(\d{1,3}(?:,\d{3})*(?:k|K)?)"#
+        guard let regex = try? NSRegularExpression(pattern: numberPattern, options: []) else {
+            return cleaned
         }
         
-        // Truncate if too long
-        return truncateText(cleaned, maxLength: 25)
+        let nsString = cleaned as NSString
+        let results = regex.matches(in: cleaned, options: [], range: NSRange(location: 0, length: nsString.length))
+        
+        guard !results.isEmpty else {
+            return cleaned
+        }
+        
+        // Check if hourly or monthly (convert to annual)
+        let isHourly = cleaned.lowercased().contains("hour") || cleaned.lowercased().contains("hr") || cleaned.lowercased().contains("hourly")
+        let isMonthly = cleaned.lowercased().contains("month") || cleaned.lowercased().contains("mo") || cleaned.lowercased().contains("monthly")
+        
+        // Extract and convert values
+        var values: [Int] = []
+        for match in results {
+            let matchString = nsString.substring(with: match.range)
+            var value = Int(matchString.replacingOccurrences(of: ",", with: "").replacingOccurrences(of: "k", with: "", options: .caseInsensitive)) ?? 0
+            
+            // If it didn't have "k" and is > 1000, convert to thousands
+            if !matchString.lowercased().contains("k") && value > 1000 {
+                value = value / 1000
+            }
+            
+            // Convert hourly to annual (rough: $50/hr ≈ $100k/year)
+            if isHourly {
+                value = value * 2
+            }
+            // Convert monthly to annual thousands
+            if isMonthly {
+                value = (value * 12) / 1000
+            }
+            
+            values.append(value)
+        }
+        
+        // Format as simplified range - ALWAYS show range if multiple values exist
+        var formattedSalary = ""
+        if values.count >= 2 {
+            // Range: $100k - $150k - ALWAYS show both values
+            let min = values.min() ?? 0
+            let max = values.max() ?? 0
+            if min == max {
+                formattedSalary = "$\(min)k"
+            } else {
+                // Always show as range when we have distinct min and max
+                formattedSalary = "$\(min)k - $\(max)k"
+            }
+        } else if values.count == 1 {
+            let value = values[0]
+            // Check for "+" or "up to" notation
+            if cleaned.lowercased().contains("+") || cleaned.lowercased().contains("plus") || cleaned.lowercased().contains("minimum") {
+                formattedSalary = "$\(value)k+"
+            } else if cleaned.lowercased().contains("up to") || cleaned.lowercased().contains("maximum") || cleaned.lowercased().contains("max") {
+                formattedSalary = "Up to $\(value)k"
+            } else {
+                formattedSalary = "$\(value)k"
+            }
+        }
+        
+        // If we couldn't format, return cleaned original
+        if formattedSalary.isEmpty {
+            // Remove redundant text
+            cleaned = cleaned.replacingOccurrences(of: "per year", with: "", options: .caseInsensitive)
+            cleaned = cleaned.replacingOccurrences(of: "per month", with: "", options: .caseInsensitive)
+            cleaned = cleaned.replacingOccurrences(of: "per hour", with: "", options: .caseInsensitive)
+            cleaned = cleaned.replacingOccurrences(of: "annually", with: "", options: .caseInsensitive)
+            cleaned = cleaned.replacingOccurrences(of: "monthly", with: "", options: .caseInsensitive)
+            cleaned = cleaned.replacingOccurrences(of: "hourly", with: "", options: .caseInsensitive)
+            cleaned = cleaned.replacingOccurrences(of: "  ", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+            return truncateText(cleaned, maxLength: 25)
+        }
+        
+        return formattedSalary
     }
     
     // MARK: - Bubble Info Model
@@ -964,6 +1092,29 @@ struct JobPostCard: View {
         let icon: String
         let text: String
         let color: Color
+    }
+    
+    // MARK: - AI Job Description Summarization
+    private func summarizeJobDescription(_ description: String) async {
+        guard !description.isEmpty else { return }
+        
+        await MainActor.run {
+            isSummarizingDescription = true
+        }
+        
+        do {
+            let summary = try await OpenAIService.shared.summarizeJobDescription(description)
+            await MainActor.run {
+                jobDescriptionSummary = summary
+                isSummarizingDescription = false
+            }
+        } catch {
+            print("⚠️ Failed to summarize job description: \(error.localizedDescription)")
+            await MainActor.run {
+                isSummarizingDescription = false
+                // Keep jobDescriptionSummary as nil to show original description
+            }
+        }
     }
     
     private func formatDate(_ dateString: String) -> String {

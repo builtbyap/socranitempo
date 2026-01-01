@@ -365,13 +365,7 @@ async function fetchFromAdzunaAPI(keywords: string, location: string): Promise<a
       posted_date: job.created ? new Date(job.created).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       description: job.description ? cleanJobText(job.description) : null,
       url: job.redirect_url || job.url || null,
-      salary: job.salary_min && job.salary_max 
-        ? `$${job.salary_min.toLocaleString()} - $${job.salary_max.toLocaleString()}`
-        : job.salary_min 
-        ? `$${job.salary_min.toLocaleString()}+`
-        : job.salary_max
-        ? `Up to $${job.salary_max.toLocaleString()}`
-        : "Salary not specified",
+      salary: formatSalary(job.salary_min, job.salary_max) || "Salary not specified",
       job_type: job.contract_type || job.job_type || null,
     }))
     
@@ -458,7 +452,9 @@ async function scrapeTheMuse(keywords: string, location: string): Promise<any[]>
         posted_date: job.publication_date ? new Date(job.publication_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
         description: (job.contents || job.description || job.summary) ? cleanJobText(job.contents || job.description || job.summary) : null,
         url: job.refs?.landing_page || job.url || job.refs?.jobs_page || null,
-        salary: job.salary || job.salary_min ? (job.salary_min && job.salary_max ? `$${job.salary_min.toLocaleString()} - $${job.salary_max.toLocaleString()}` : `$${job.salary_min.toLocaleString()}+`) : 'Salary not specified',
+        salary: formatSalaryText(
+          job.salary || (job.salary_min && job.salary_max ? `$${job.salary_min} - $${job.salary_max}` : job.salary_min ? `$${job.salary_min}+` : null)
+        ),
         job_type: job.type || job.job_type || null,
       })
     }
@@ -532,38 +528,98 @@ function extractSalaryRange(salaryText: string | null | undefined): { min: numbe
   return { min: Math.round(avg * 0.8), max: Math.round(avg * 1.2) }
 }
 
+// AI-enhanced salary formatting - simplifies and normalizes salary text
+// Handles both string text and structured objects
+function formatSalaryText(salaryText: string | null | undefined | any): string {
+  if (!salaryText) {
+    return "Salary not specified"
+  }
+  
+  // Handle structured objects (e.g., from Workday API)
+  if (typeof salaryText === 'object' && salaryText !== null) {
+    try {
+      // Try to parse as JSON if it's a stringified object
+      if (typeof salaryText === 'string') {
+        try {
+          salaryText = JSON.parse(salaryText)
+        } catch {
+          // Not JSON, treat as string
+        }
+      }
+      
+      // Check for structured salary object with min/max
+      if (typeof salaryText === 'object' && salaryText !== null) {
+        const min = salaryText.min || salaryText.minimum || salaryText.salaryMin || salaryText.from
+        const max = salaryText.max || salaryText.maximum || salaryText.salaryMax || salaryText.to
+        
+        if (min !== undefined && max !== undefined) {
+          // Convert to thousands if needed
+          const minK = typeof min === 'number' ? (min > 1000 ? Math.round(min / 1000) : min) : parseInt(String(min).replace(/[^0-9]/g, '')) / 1000
+          const maxK = typeof max === 'number' ? (max > 1000 ? Math.round(max / 1000) : max) : parseInt(String(max).replace(/[^0-9]/g, '')) / 1000
+          
+          if (minK === maxK) {
+            return `$${minK}k`
+          }
+          return `$${minK}k - $${maxK}k`
+        } else if (min !== undefined) {
+          const minK = typeof min === 'number' ? (min > 1000 ? Math.round(min / 1000) : min) : parseInt(String(min).replace(/[^0-9]/g, '')) / 1000
+          return `$${minK}k+`
+        } else if (max !== undefined) {
+          const maxK = typeof max === 'number' ? (max > 1000 ? Math.round(max / 1000) : max) : parseInt(String(max).replace(/[^0-9]/g, '')) / 1000
+          return `Up to $${maxK}k`
+        }
+        
+        // Try to extract from text field if available
+        if (salaryText.text || salaryText.value || salaryText.amount) {
+          salaryText = salaryText.text || salaryText.value || salaryText.amount
+        } else {
+          // Fall back to stringifying the object
+          salaryText = JSON.stringify(salaryText)
+        }
+      }
+    } catch (error) {
+      // If parsing fails, treat as string
+      salaryText = String(salaryText)
+    }
+  }
+  
+  // Handle string input
+  const salaryString = String(salaryText)
+  if (!salaryString || salaryString.toLowerCase().includes('not specified') || salaryString.toLowerCase().includes('competitive')) {
+    return "Salary not specified"
+  }
+  
+  // Extract salary range using extractSalaryRange
+  const range = extractSalaryRange(salaryString)
+  
+  if (range.min === null && range.max === null) {
+    return "Salary not specified"
+  }
+  
+  // Format as simplified range in "k" notation - ALWAYS show range if both values exist
+  if (range.min !== null && range.max !== null) {
+    // Range: $100k - $150k - ALWAYS show both values
+    if (range.min === range.max) {
+      return `$${range.min}k`
+    }
+    return `$${range.min}k - $${range.max}k`
+  } else if (range.min !== null) {
+    // Minimum: $100k+
+    return `$${range.min}k+`
+  } else if (range.max !== null) {
+    // Maximum: Up to $150k
+    return `Up to $${range.max}k`
+  }
+  
+  return "Salary not specified"
+}
+
 // Enhanced data extraction helpers (AI-like parsing)
 function extractSalary(text: string | null | undefined): string {
   if (!text) return "Salary not specified"
   
-  const textLower = text.toLowerCase()
-  
-  // Enhanced salary patterns with better matching
-  const salaryPatterns = [
-    // Ranges: $100k - $150k, $100,000 - $150,000
-    /\$[\d,]+(?:k|K)?\s*[-–—]\s*\$?[\d,]+(?:k|K)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi,
-    // Single amounts: $100k, $100,000
-    /\$[\d,]+(?:k|K)?(?:\s*(?:per|\/)\s*(?:year|month|hour|yr|mo|hr|annually|monthly|hourly))?/gi,
-    // With context: "salary: $100k", "compensation: $100k - $150k"
-    /(?:salary|compensation|pay|wage|base|total|package).*?\$[\d,]+(?:k|K)?(?:\s*[-–—]\s*\$?[\d,]+(?:k|K)?)?/gi,
-    // Annual/monthly/hourly: "$100k annually", "$50/hour"
-    /\$[\d,]+(?:k|K)?\s*(?:annually|yearly|per\s+year|per\s+month|per\s+hour|hourly|monthly)/gi,
-  ]
-  
-  for (const pattern of salaryPatterns) {
-    const matches = text.match(pattern)
-    if (matches && matches.length > 0) {
-      // Clean up the match
-      let salary = matches[0].trim()
-      // Remove common prefixes
-      salary = salary.replace(/^(?:salary|compensation|pay|wage|base|total|package)[:\s]+/i, '')
-      // Normalize
-      salary = salary.replace(/\s+/g, ' ')
-      return salary
-    }
-  }
-  
-  return "Salary not specified"
+  // Use the new AI-enhanced formatting
+  return formatSalaryText(text)
 }
 
 // Clean and normalize job text (remove duplicates, fix formatting, etc.)
@@ -760,9 +816,9 @@ async function scrapeGreenhouse(keywords: string, location: string): Promise<any
               // Extract salary using enhanced extraction
               let salary = "Salary not specified"
               if (job.salary || job.compensation) {
-                salary = extractSalary(job.salary || job.compensation)
+                salary = formatSalaryText(job.salary || job.compensation)
               } else if (job.content) {
-                salary = extractSalary(job.content)
+                salary = formatSalaryText(job.content)
               }
               
               const jobUrl = job.absolute_url || `https://boards.greenhouse.io/${company}/jobs/${job.id}`
@@ -906,9 +962,9 @@ async function scrapeLever(keywords: string, location: string): Promise<any[]> {
               // Extract salary using enhanced extraction
               let salary = "Salary not specified"
               if (job.salary || job.compensation) {
-                salary = extractSalary(job.salary || job.compensation)
+                salary = formatSalaryText(job.salary || job.compensation)
               } else if (job.text || job.descriptionPlain) {
-                salary = extractSalary(job.text || job.descriptionPlain)
+                salary = formatSalaryText(job.text || job.descriptionPlain)
               }
               
               // Check if Lever API provides salary data first
@@ -1248,16 +1304,16 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
                 // Extract salary if available
                 let salary = 'Salary not specified'
                 if (job.compensation) {
-                  salary = extractSalary(JSON.stringify(job.compensation))
+                  salary = formatSalaryText(JSON.stringify(job.compensation))
                 } else if (job.salaryRange) {
-                  salary = extractSalary(JSON.stringify(job.salaryRange))
+                  salary = formatSalaryText(JSON.stringify(job.salaryRange))
                 } else if (job.compensationText) {
-                  salary = extractSalary(job.compensationText)
+                  salary = formatSalaryText(job.compensationText)
                 } else if (job.salary) {
-                  salary = extractSalary(JSON.stringify(job.salary))
+                  salary = formatSalaryText(JSON.stringify(job.salary))
                 } else if (job.description?.text) {
                   // Try to extract salary from job description
-                  salary = extractSalary(job.description.text)
+                  salary = formatSalaryText(job.description.text)
                 }
                 
                 // Extract job type
@@ -1998,16 +2054,23 @@ async function scrapeZipRecruiter(keywords: string, location: string): Promise<a
   return jobs
 }
 
-// Format salary from Adzuna API
+// Format salary from Adzuna API - simplified to "k" notation
 function formatSalary(min: number | null, max: number | null): string | null {
   if (!min && !max) return null
   
-  if (min && max) {
-    return `$${min.toLocaleString()} - $${max.toLocaleString()}`
-  } else if (min) {
-    return `$${min.toLocaleString()}+`
-  } else if (max) {
-    return `Up to $${max.toLocaleString()}`
+  // Convert to thousands (k notation) for consistency
+  const minK = min ? Math.round(min / 1000) : null
+  const maxK = max ? Math.round(max / 1000) : null
+  
+  if (minK && maxK) {
+    if (minK === maxK) {
+      return `$${minK}k`
+    }
+    return `$${minK}k - $${maxK}k`
+  } else if (minK) {
+    return `$${minK}k+`
+  } else if (maxK) {
+    return `Up to $${maxK}k`
   }
   
   return null
