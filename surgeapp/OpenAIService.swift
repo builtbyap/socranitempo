@@ -113,7 +113,7 @@ class OpenAIService {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 10.0 // Reduce timeout for faster failure handling
+        request.timeoutInterval = 30.0 // Increased timeout for summarization (30 seconds)
         
         var requestBody: [String: Any] = [
             "model": "gpt-4o-mini", // Already using fastest model
@@ -136,7 +136,13 @@ class OpenAIService {
         
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // Use URLSession with custom configuration for longer timeout (30 seconds)
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30.0
+        config.timeoutIntervalForResource = 30.0
+        let session = URLSession(configuration: config)
+        
+        let (data, response) = try await session.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
             throw OpenAIError.requestFailed(message: "No HTTP response")

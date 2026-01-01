@@ -466,7 +466,7 @@ struct JobPostCard: View {
                                         HStack(spacing: 4) {
                                             Image(systemName: "briefcase.fill")
                                                 .font(.system(size: 11))
-                                            Text(jobType)
+                                            Text(capitalizeWords(jobType))
                                                 .font(.system(size: 13, weight: .medium))
                                         }
                                         .foregroundColor(.purple)
@@ -942,7 +942,7 @@ struct JobPostCard: View {
         var bubbles: [BubbleInfo] = []
         
         // Location Bubble (always show, but truncate if too long)
-        let locationText = truncateText(post.location, maxLength: 25)
+        let locationText = capitalizeWords(truncateText(post.location, maxLength: 25))
         bubbles.append(BubbleInfo(id: "location", icon: "mappin.circle.fill", text: locationText, color: .blue))
         
         // Remote Option Bubble (if detected)
@@ -966,20 +966,34 @@ struct JobPostCard: View {
         if let salary = salaryToUse {
             let cleanSalary = cleanSalaryText(salary)
             if !cleanSalary.isEmpty {
+                // Salary is already formatted (e.g., "$100k - $150k"), keep as is
                 bubbles.append(BubbleInfo(id: "salary", icon: "dollarsign.circle.fill", text: cleanSalary, color: .green))
             }
         }
         
         // Job Type Bubble
         if let jobType = post.jobType, !jobType.isEmpty {
-            let cleanJobType = truncateText(jobType, maxLength: 20)
+            let cleanJobType = capitalizeWords(truncateText(jobType, maxLength: 20))
             bubbles.append(BubbleInfo(id: "jobType", icon: "briefcase.fill", text: cleanJobType, color: .orange))
         }
         
         // Posted Date Bubble
-        bubbles.append(BubbleInfo(id: "date", icon: "clock.fill", text: formatDate(post.postedDate), color: .purple))
+        let dateText = capitalizeWords(formatDate(post.postedDate))
+        bubbles.append(BubbleInfo(id: "date", icon: "clock.fill", text: dateText, color: .purple))
         
         return bubbles
+    }
+    
+    // MARK: - Capitalize Words Helper
+    private func capitalizeWords(_ text: String) -> String {
+        // Split by spaces and capitalize each word
+        return text.split(separator: " ")
+            .map { word in
+                // Capitalize first letter, keep rest lowercase
+                guard let first = word.first else { return String(word) }
+                return String(first).uppercased() + String(word.dropFirst()).lowercased()
+            }
+            .joined(separator: " ")
     }
     
     private func truncateText(_ text: String, maxLength: Int) -> String {
@@ -1114,22 +1128,44 @@ struct JobPostCard: View {
     private func summarizeJobDescription(_ description: String) async {
         guard !description.isEmpty else { return }
         
-        await MainActor.run {
-            isSummarizingDescription = true
+        // Don't attempt if we've already tried or are currently summarizing
+        if hasAttemptedSummary || isSummarizingDescription {
+            return
         }
         
-        do {
-            let summary = try await OpenAIService.shared.summarizeJobDescription(description)
-            await MainActor.run {
-                jobDescriptionSummary = summary
-                isSummarizingDescription = false
+        await MainActor.run {
+            isSummarizingDescription = true
+            hasAttemptedSummary = true
+        }
+        
+        // Retry logic: try up to 2 times with exponential backoff
+        var lastError: Error?
+        for attempt in 1...2 {
+            do {
+                let summary = try await OpenAIService.shared.summarizeJobDescription(description)
+                await MainActor.run {
+                    jobDescriptionSummary = summary
+                    isSummarizingDescription = false
+                }
+                return // Success, exit function
+            } catch {
+                lastError = error
+                print("⚠️ Failed to summarize job description (attempt \(attempt)/2): \(error.localizedDescription)")
+                
+                // If it's a timeout and we have retries left, wait before retrying
+                if attempt < 2 && (error.localizedDescription.contains("timeout") || error.localizedDescription.contains("timed out")) {
+                    // Exponential backoff: wait 2 seconds before retry
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    continue
+                }
             }
-        } catch {
-            print("⚠️ Failed to summarize job description: \(error.localizedDescription)")
-            await MainActor.run {
-                isSummarizingDescription = false
-                // Keep jobDescriptionSummary as nil to show original description
-            }
+        }
+        
+        // All attempts failed
+        await MainActor.run {
+            isSummarizingDescription = false
+            // Keep jobDescriptionSummary as nil to show original description
+            // But keep hasAttemptedSummary = true so we don't retry
         }
     }
     
@@ -1196,13 +1232,25 @@ struct InfoBubble: View {
     let text: String
     let color: Color
     
+    // Helper to capitalize each word
+    private func capitalizeWords(_ text: String) -> String {
+        // Split by spaces and capitalize each word
+        return text.split(separator: " ")
+            .map { word in
+                // Capitalize first letter, keep rest lowercase
+                guard let first = word.first else { return String(word) }
+                return String(first).uppercased() + String(word.dropFirst()).lowercased()
+            }
+            .joined(separator: " ")
+    }
+    
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(color)
             
-            Text(text)
+            Text(capitalizeWords(text))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.primary)
                 .lineLimit(1)
