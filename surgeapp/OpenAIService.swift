@@ -13,6 +13,9 @@ class OpenAIService {
     private let apiKey = Config.openAIKey
     private let baseURL = "https://api.openai.com/v1/chat/completions"
     
+    // Cache for job description summaries to avoid re-fetching
+    private var summaryCache: [String: JobDescriptionSummary] = [:]
+    
     private init() {}
     
     // MARK: - Parse and Categorize Resume
@@ -88,7 +91,19 @@ class OpenAIService {
     
     // MARK: - Summarize Job Description
     func summarizeJobDescription(_ description: String) async throws -> JobDescriptionSummary {
-        let prompt = createJobDescriptionPrompt(description: description)
+        // Create cache key from description hash (first 500 chars for uniqueness)
+        let cacheKey = String(description.prefix(500))
+        
+        // Check cache first
+        if let cachedSummary = summaryCache[cacheKey] {
+            print("✅ Using cached summary for job description")
+            return cachedSummary
+        }
+        
+        // Truncate description to first 2000 characters for faster processing
+        // Most important info is usually at the beginning
+        let truncatedDescription = String(description.prefix(2000))
+        let prompt = createJobDescriptionPrompt(description: truncatedDescription)
         
         guard let url = URL(string: baseURL) else {
             throw OpenAIError.invalidURL
@@ -98,20 +113,22 @@ class OpenAIService {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10.0 // Reduce timeout for faster failure handling
         
         var requestBody: [String: Any] = [
-            "model": "gpt-4o-mini",
+            "model": "gpt-4o-mini", // Already using fastest model
             "messages": [
                 [
                     "role": "system",
-                    "content": "You are an expert job description analyzer. Summarize job descriptions into organized bullet points with clear subcategories. Extract all important information and present it in a structured, easy-to-read format."
+                    "content": "You are an expert job description analyzer. Summarize job descriptions into organized bullet points with clear subcategories. Extract all important information and present it in a structured, easy-to-read format. Be concise and focus on key information."
                 ],
                 [
                     "role": "user",
                     "content": prompt
                 ]
             ],
-            "temperature": 0.3 // Low temperature for consistent, accurate summaries
+            "temperature": 0.2, // Lower temperature for faster, more deterministic responses
+            "max_tokens": 800 // Limit response size for faster generation
         ]
         
         // Add response_format for JSON mode
@@ -149,7 +166,13 @@ class OpenAIService {
         
         do {
             let summary = try decoder.decode(JobDescriptionSummaryResponse.self, from: jsonData)
-            return convertToJobDescriptionSummary(summary)
+            let convertedSummary = convertToJobDescriptionSummary(summary)
+            
+            // Cache the summary
+            let cacheKey = String(description.prefix(500))
+            summaryCache[cacheKey] = convertedSummary
+            
+            return convertedSummary
         } catch {
             print("❌ JSON Decoding Error: \(error)")
             print("📄 Response content: \(content)")

@@ -322,6 +322,7 @@ struct JobPostCard: View {
     @State private var detailsError: String? = nil
     @State private var jobDescriptionSummary: JobDescriptionSummary? = nil
     @State private var isSummarizingDescription = false
+    @State private var hasAttemptedSummary = false // Track if we've attempted summarization
     
     var body: some View {
         return GeometryReader { geometry in
@@ -598,24 +599,29 @@ struct JobPostCard: View {
                                                 .padding(.bottom, 8)
                                             }
                                         }
-                                    } else if isSummarizingDescription {
-                                        // Show loading state while summarizing
-                                        HStack(spacing: 8) {
-                                            ProgressView()
-                                                .scaleEffect(0.8)
-                                            Text("Summarizing job description...")
-                                                .font(.system(size: 14))
-                                                .foregroundColor(.secondary)
-                                        }
                                     } else {
-                                        // Fallback to original description if summarization fails
-                                        Text(description)
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.primary)
-                                            .lineSpacing(4)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .multilineTextAlignment(.leading)
-                                            .fixedSize(horizontal: false, vertical: true)
+                                        // Always show original description immediately while summarizing in background
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Text(description)
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.primary)
+                                                .lineSpacing(4)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .multilineTextAlignment(.leading)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            
+                                            // Show subtle loading indicator if summarizing
+                                            if isSummarizingDescription {
+                                                HStack(spacing: 6) {
+                                                    ProgressView()
+                                                        .scaleEffect(0.7)
+                                                    Text("Creating summary...")
+                                                        .font(.system(size: 12))
+                                                        .foregroundColor(.secondary)
+                                                }
+                                                .padding(.top, 4)
+                                            }
+                                        }
                                     }
                                 } else {
                                     // Show placeholder if no description available
@@ -628,14 +634,24 @@ struct JobPostCard: View {
                             .padding(.horizontal, 20)
                             .padding(.bottom, 20)
                             .onAppear {
-                                // Trigger AI summarization when description appears
+                                // Always trigger AI summarization in background when card appears
+                                // User sees original description immediately, summary appears when ready
                                 if let description = post.description, 
-                                   !description.isEmpty, 
-                                   jobDescriptionSummary == nil,
-                                   !isSummarizingDescription {
+                                   !description.isEmpty,
+                                   !hasAttemptedSummary {
                                     Task {
                                         await summarizeJobDescription(description)
                                     }
+                                }
+                            }
+                            .task {
+                                // Also trigger on task to ensure it runs even if onAppear doesn't fire
+                                // This ensures every card gets a summary attempt
+                                if let description = post.description, 
+                                   !description.isEmpty,
+                                   !hasAttemptedSummary,
+                                   jobDescriptionSummary == nil {
+                                    await summarizeJobDescription(description)
                                 }
                             }
                             
