@@ -100,7 +100,7 @@ class AutoApplyService {
         let decoder = JSONDecoder()
         let result = try decoder.decode(AutoApplyResult.self, from: data)
         
-        print("✅ Auto-apply result: success=\(result.success), filledFields=\(result.filledFields), atsSystem=\(result.atsSystem)")
+        print("✅ Auto-apply result: success=\(result.success), filledFields=\(result.filledFields), atsSystem=\(result.atsSystem), submitted=\(result.submitted ?? false)")
         
         return result
     }
@@ -201,6 +201,8 @@ struct AutoApplyResult: Codable {
     let screenshot: String? // Base64 screenshot for debugging
     let questions: [PendingQuestion]? // Questions that need user input
     let needsUserInput: Bool? // Whether user needs to answer questions
+    let submitted: Bool? // Whether the form was actually submitted
+    let botDetected: Bool? // Whether bot detection was encountered
 }
 
 // MARK: - Auto Apply Error

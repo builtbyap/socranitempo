@@ -35,25 +35,281 @@ app.post('/automate', async (req, res) => {
     
     console.log(`🚀 Starting automation for: ${jobUrl}`);
     
+    // Check if this is an Adzuna job (they have strict bot detection)
+    const isAdzuna = jobUrl.toLowerCase().includes('adzuna.com');
+    
     browser = await chromium.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled', // Hide automation flags
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-web-security',
+        '--disable-features=VizDisplayCompositor'
+      ]
     });
     
+    // More realistic browser context with better fingerprinting
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      viewport: { width: 1280, height: 720 }
+      viewport: { width: 1920, height: 1080 },
+      locale: 'en-US',
+      timezoneId: 'America/New_York',
+      permissions: ['geolocation'],
+      geolocation: { latitude: 40.7128, longitude: -74.0060 }, // NYC coordinates
+      colorScheme: 'light',
+      // Add extra headers to look more like a real browser
+      extraHTTPHeaders: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0'
+      }
+    });
+    
+    // Remove webdriver property to avoid detection
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => false,
+      });
+      
+      // Override the plugins property to use a custom getter
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+      });
+      
+      // Override the languages property to use a custom getter
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en'],
+      });
+      
+      // Override chrome property
+      window.chrome = {
+        runtime: {},
+      };
+      
+      // Override permissions
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
     });
     
     page = await context.newPage();
     
     console.log(`🌐 Navigating to: ${jobUrl}`);
-    await page.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    
+    // Follow redirects and wait for final page to load
+    try {
+      await page.goto(jobUrl, { 
+        waitUntil: 'domcontentloaded', 
+        timeout: 20000 
+      });
+      
+      // Wait for any redirects to complete
+      await page.waitForTimeout(3000);
+      
+      // Check if URL changed (redirect happened)
+      const finalUrl = page.url();
+      if (finalUrl !== jobUrl) {
+        console.log(`🔄 Redirected from ${jobUrl} to ${finalUrl}`);
+      }
+    } catch (error) {
+      console.log(`⚠️ Navigation error: ${error.message}`);
+      // Continue anyway - page might have loaded partially
+    }
+    
+    // Wait a bit for page to fully load
+    await page.waitForTimeout(2000);
+    
+    // Check for bot detection pages (especially Adzuna)
+    const pageContent = await page.content();
+    const pageText = await page.textContent('body').catch(() => '');
+    const currentUrl = page.url();
+    
+    // Detect Adzuna's bot detection page
+    if (pageText.includes('suspicious behaviour') || 
+        pageText.includes('suspicious behavior') ||
+        pageText.includes('unusual behaviour') ||
+        pageText.includes('unusual behavior') ||
+        (currentUrl.includes('adzuna.com') && (pageText.includes('detected') || pageText.includes('suspicious')))) {
+      console.log('⚠️ Bot detection page detected (likely Adzuna)');
+      const screenshot = await page.screenshot({ encoding: 'base64' });
+      
+      await browser.close();
+      browser = null;
+      
+      return res.json({
+        success: false,
+        filledFields: 0,
+        atsSystem: 'adzuna',
+        error: 'Bot detection: This job board (Adzuna) has detected automated access. Please apply manually through the website.',
+        screenshot: screenshot.toString('base64'),
+        questions: [],
+        needsUserInput: false,
+        submitted: false,
+        botDetected: true
+      });
+    }
     
     // Detect ATS system
-    const pageContent = await page.content();
     const atsSystem = detectATSSystem(jobUrl, pageContent);
     console.log(`🔍 Detected ATS: ${atsSystem}`);
+    
+    // Check if we're on a job board listing page (not an application form)
+    const currentUrlAfterLoad = page.url();
+    const isJobBoardListing = currentUrlAfterLoad.includes('adzuna.com') ||
+                             currentUrlAfterLoad.includes('indeed.com') ||
+                             currentUrlAfterLoad.includes('monster.com') ||
+                             currentUrlAfterLoad.includes('glassdoor.com') ||
+                             currentUrlAfterLoad.includes('ziprecruiter.com') ||
+                             pageText.includes('Filter results') ||
+                             pageText.includes('Jobs in') ||
+                             pageContent.includes('job-listing') ||
+                             pageContent.includes('job-card');
+    
+    if (isJobBoardListing) {
+      console.log('⚠️ WARNING: On job board listing page, not application form');
+      console.log('⚠️ This URL may not be a direct application link');
+      
+      // Try to extract the actual application URL from the page
+      console.log('🔍 Attempting to find application form URL...');
+      
+      try {
+        // First, try to find an "Apply" or "Easy Apply" button/link
+        const applyButtonSelectors = [
+          'a[href*="apply"]',
+          'a[href*="application"]',
+          'a[href*="careers"]',
+          'button:has-text("Apply")',
+          'button:has-text("Easy Apply")',
+          'a:has-text("Apply")',
+          'a:has-text("Easy Apply")',
+          '[data-testid*="apply"]',
+          '[data-automation-id*="apply"]',
+          '.apply-button',
+          '.apply-link',
+          '#apply-button',
+          '#apply-link'
+        ];
+        
+        let foundApplyButton = false;
+        
+        for (const selector of applyButtonSelectors) {
+          try {
+            // Try to find the element
+            const applyButton = await page.$(selector);
+            if (applyButton) {
+              // Check if it's a link (has href)
+              const href = await applyButton.evaluate(el => el.href || el.getAttribute('href'));
+              
+              if (href && !href.includes('javascript:') && !href.includes('#')) {
+                console.log(`🔗 Found apply link: ${href} - navigating directly`);
+                await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                await page.waitForTimeout(3000);
+                foundApplyButton = true;
+                break;
+              } else {
+                // It's a button, try clicking it
+                console.log(`🔘 Found apply button: ${selector} - clicking to navigate`);
+                await applyButton.click();
+                
+                // Wait for navigation (could be same page or new page)
+                try {
+                  await Promise.race([
+                    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }),
+                    page.waitForTimeout(5000)
+                  ]);
+                } catch (navError) {
+                  // Navigation timeout is okay - might be same-page form
+                }
+                
+                await page.waitForTimeout(3000);
+                foundApplyButton = true;
+                break;
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+        
+        if (!foundApplyButton) {
+          // Try to extract application URL from page content (some sites embed it)
+          try {
+            const applicationUrl = await page.evaluate(() => {
+              // Look for common patterns in page source
+              const scripts = Array.from(document.querySelectorAll('script'));
+              for (const script of scripts) {
+                const content = script.textContent || '';
+                // Look for URLs in JSON or JavaScript
+                const urlMatch = content.match(/["'](https?:\/\/[^"']*\/apply[^"']*)["']/i) ||
+                                content.match(/["'](https?:\/\/[^"']*\/application[^"']*)["']/i) ||
+                                content.match(/applyUrl["']?\s*[:=]\s*["']([^"']+)["']/i);
+                if (urlMatch && urlMatch[1]) {
+                  return urlMatch[1];
+                }
+              }
+              
+              // Look for meta tags or data attributes
+              const metaTags = Array.from(document.querySelectorAll('meta[property*="url"], meta[name*="url"]'));
+              for (const meta of metaTags) {
+                const content = meta.getAttribute('content');
+                if (content && (content.includes('/apply') || content.includes('/application'))) {
+                  return content;
+                }
+              }
+              
+              return null;
+            });
+            
+            if (applicationUrl) {
+              console.log(`🔗 Extracted application URL from page: ${applicationUrl}`);
+              await page.goto(applicationUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+              await page.waitForTimeout(3000);
+              foundApplyButton = true;
+            }
+          } catch (e) {
+            console.log('⚠️ Could not extract application URL from page content');
+          }
+        }
+        
+        if (!foundApplyButton) {
+          console.log('⚠️ Could not find apply button or application URL - may need manual application');
+          console.log('⚠️ Current page might already be the application form, or requires manual navigation');
+        } else {
+          // Update page content after navigation
+          const newPageText = await page.textContent('body').catch(() => '') || '';
+          const newPageContent = await page.content();
+          const newUrl = page.url();
+          
+          // Check if we're still on a listing page
+          const stillOnListing = newUrl.includes('adzuna.com') ||
+                                newUrl.includes('indeed.com') ||
+                                newPageText.includes('Filter results') ||
+                                newPageText.includes('Jobs in');
+          
+          if (stillOnListing) {
+            console.log('⚠️ Still on job board listing after navigation - application form may not be accessible');
+          } else {
+            console.log('✅ Navigated to application form or job details page');
+          }
+        }
+      } catch (e) {
+        console.log(`⚠️ Error trying to find application form: ${e.message}`);
+      }
+    }
     
     // Wait for dynamic content (reduced timeout)
     await page.waitForTimeout(1000);
@@ -108,55 +364,155 @@ app.post('/automate', async (req, res) => {
     // Attempt to submit the form
     console.log('📤 Attempting to submit application...');
     let submitted = false;
+    const urlBeforeSubmit = page.url();
+    
     try {
-      // Try to find and click submit button
-      const submitSelectors = [
-        'button[type="submit"]',
-        'input[type="submit"]',
-        'button:has-text("Submit")',
-        'button:has-text("Apply")',
-        'button:has-text("Send")',
-        'button[id*="submit"]',
-        'button[id*="apply"]',
-        'button[class*="submit"]',
-        'button[class*="apply"]',
-        '[data-testid*="submit"]',
-        '[data-testid*="apply"]'
-      ];
-      
-      for (const selector of submitSelectors) {
-        try {
-          const submitButton = await page.$(selector);
-          if (submitButton) {
-            console.log(`🔘 Found submit button: ${selector}`);
-            await submitButton.click();
-            await page.waitForTimeout(2000); // Wait for submission
-            submitted = true;
-            console.log('✅ Form submitted successfully');
-            break;
+      // Only try to submit if we actually filled fields or uploaded resume
+      if (filledFields > 0 || resumeUploaded) {
+        // Try to find and click submit button
+        const submitSelectors = [
+          'button[type="submit"]',
+          'input[type="submit"]',
+          'button:has-text("Submit")',
+          'button:has-text("Apply")',
+          'button:has-text("Send")',
+          'button[id*="submit"]',
+          'button[id*="apply"]',
+          'button[class*="submit"]',
+          'button[class*="apply"]',
+          '[data-testid*="submit"]',
+          '[data-testid*="apply"]'
+        ];
+        
+        for (const selector of submitSelectors) {
+          try {
+            const submitButton = await page.$(selector);
+            if (submitButton) {
+              console.log(`🔘 Found submit button: ${selector}`);
+              await submitButton.click();
+              
+              // Wait for navigation or page change (up to 5 seconds)
+              try {
+                await Promise.race([
+                  page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 }),
+                  page.waitForTimeout(5000)
+                ]);
+              } catch (navError) {
+                // Navigation timeout is okay - page might update without navigation
+              }
+              
+              // Wait a bit more for any async updates
+              await page.waitForTimeout(2000);
+              
+              // Verify submission by checking for confirmation indicators
+              const currentUrl = page.url();
+              const pageText = await page.textContent('body').catch(() => '') || '';
+              const pageContent = await page.content();
+              
+              // Check for confirmation text
+              const confirmationIndicators = [
+                'thank you',
+                'application received',
+                'application submitted',
+                'successfully applied',
+                'confirmation',
+                'your application has been',
+                'we have received your application'
+              ];
+              
+              const hasConfirmationText = confirmationIndicators.some(indicator => 
+                pageText.toLowerCase().includes(indicator)
+              );
+              
+              // Check if URL changed (often indicates successful submission)
+              const urlChanged = currentUrl !== urlBeforeSubmit && 
+                                 !currentUrl.includes('adzuna.com') &&
+                                 !currentUrl.includes('indeed.com') &&
+                                 !currentUrl.includes('monster.com');
+              
+              // Check if we're on a job listing page (bad sign - means we didn't get to application form)
+              const isJobListingPage = currentUrl.includes('adzuna.com') ||
+                                       pageText.includes('Filter results') ||
+                                       pageText.includes('Jobs in') ||
+                                       pageContent.includes('job-listing') ||
+                                       pageContent.includes('job-card');
+              
+              // Only mark as submitted if we have clear evidence
+              if (hasConfirmationText || (urlChanged && !isJobListingPage)) {
+                submitted = true;
+                console.log('✅ Form submitted successfully - confirmation detected');
+              } else if (isJobListingPage) {
+                console.log('⚠️ Still on job listing page - form may not have been submitted');
+                submitted = false;
+              } else {
+                // URL changed but no clear confirmation - be conservative
+                console.log('⚠️ Page changed but no clear confirmation - marking as uncertain');
+                submitted = false;
+              }
+              
+              break;
+            }
+          } catch (e) {
+            continue;
           }
-        } catch (e) {
-          continue;
         }
-      }
-      
-      // If no submit button found, try form submission
-      if (!submitted) {
-        try {
-          const form = await page.$('form');
-          if (form) {
-            await form.evaluate(f => f.submit());
-            await page.waitForTimeout(2000);
-            submitted = true;
-            console.log('✅ Form submitted via form.submit()');
+        
+        // If no submit button found, try form submission
+        if (!submitted) {
+          try {
+            const form = await page.$('form');
+            if (form) {
+              await form.evaluate(f => f.submit());
+              
+              // Wait for navigation
+              try {
+                await Promise.race([
+                  page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 5000 }),
+                  page.waitForTimeout(5000)
+                ]);
+              } catch (navError) {
+                // Navigation timeout is okay
+              }
+              
+              await page.waitForTimeout(2000);
+              
+              // Verify submission
+              const currentUrl = page.url();
+              const pageText = await page.textContent('body').catch(() => '') || '';
+              const confirmationIndicators = [
+                'thank you', 'application received', 'application submitted',
+                'successfully applied', 'confirmation'
+              ];
+              
+              const hasConfirmationText = confirmationIndicators.some(indicator => 
+                pageText.toLowerCase().includes(indicator)
+              );
+              
+              const urlChanged = currentUrl !== urlBeforeSubmit;
+              const isJobListingPage = currentUrl.includes('adzuna.com') || 
+                                      currentUrl.includes('indeed.com');
+              
+              if (hasConfirmationText || (urlChanged && !isJobListingPage)) {
+                submitted = true;
+                console.log('✅ Form submitted via form.submit() - confirmation detected');
+              } else {
+                console.log('⚠️ Form.submit() called but no confirmation detected');
+                submitted = false;
+              }
+            }
+          } catch (e) {
+            console.log('⚠️ Could not submit form automatically');
           }
-        } catch (e) {
-          console.log('⚠️ Could not submit form automatically');
         }
+      } else {
+        console.log('⚠️ No fields filled - skipping form submission');
       }
     } catch (error) {
       console.log('⚠️ Form submission error:', error.message);
     }
+    
+    // Wait a bit more before taking screenshot to ensure page is stable
+    await page.waitForTimeout(1000);
     
     // Take screenshot
     const screenshot = await page.screenshot({ encoding: 'base64' });

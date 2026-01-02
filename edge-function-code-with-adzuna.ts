@@ -77,18 +77,20 @@ serve(async (req) => {
     console.log(`   - Search queries: ${JSON.stringify(queriesToSearch)}`)
     console.log(`   - Searching ${queriesToSearch.length} queries using Adzuna, The Muse, and Workday`)
     
-    // Use Adzuna, The Muse, and Workday for job searching
-    // All three sources will be searched for each query
+    // Use Adzuna, The Muse, Workday, and JobSpy for job searching
+    // All sources will be searched for each query
     const sources = [
       { name: 'Adzuna', fn: fetchFromAdzunaAPI },
       { name: 'The Muse', fn: scrapeTheMuse },
-      { name: 'Workday', fn: scrapeWorkday }
+      { name: 'Workday', fn: scrapeWorkday },
+      { name: 'JobSpy', fn: fetchFromJobSpy }
     ]
     
     console.log(`🔍 Searching ${sources.length} sources: ${sources.map(s => s.name).join(', ')}`)
     console.log(`   ✅ Adzuna: Keyword-based API search across all companies`)
     console.log(`   ✅ The Muse: Category and keyword-based API search`)
     console.log(`   ✅ Workday: ATS scraping from major companies`)
+    console.log(`   ✅ JobSpy: Multi-site scraper (LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google)`)
     
     // Early return threshold - if we get enough jobs, return immediately
     // Increased threshold to ensure all sources are searched
@@ -112,9 +114,12 @@ serve(async (req) => {
         try {
           console.log(`⏳ Starting ${source.name} for "${query}"...`)
           // Pass career interests to Workday scraping function for proper filtering
+          // Pass all filter params to JobSpy
           const jobs = await Promise.race([
             source.name === 'Workday' ? 
               (source.fn as any)(query, location, careerInterests) :
+            source.name === 'JobSpy' ?
+              (source.fn as any)(query, location, minSalary, maxSalary, careerInterests) :
               source.fn(query, location),
             new Promise<any[]>((_, reject) => 
               setTimeout(() => reject(new Error('Source timeout')), 120000) // 120 second timeout per source (Playwright needs more time)
@@ -2074,6 +2079,109 @@ function formatSalary(min: number | null, max: number | null): string | null {
   }
   
   return null
+}
+
+// JobSpy Service - Multi-site job scraper (LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google)
+async function fetchFromJobSpy(
+  keywords: string, 
+  location: string,
+  minSalary: number | null = null,
+  maxSalary: number | null = null,
+  careerInterests: string[] = []
+): Promise<any[]> {
+  const jobs: any[] = []
+  
+  try {
+    // Get JobSpy service URL from environment variable or use default
+    // You'll need to deploy the JobSpy service and set this URL
+    const jobspyServiceUrl = Deno.env.get('JOBSPY_SERVICE_URL') || 'http://localhost:8000'
+    
+    // Build search term from career interests or keywords
+    const searchTerm = careerInterests.length > 0 
+      ? careerInterests.join(' OR ')
+      : keywords || 'software engineer'
+    
+    // Determine which sites to scrape (focus on most reliable ones)
+    const sites = ['indeed', 'linkedin', 'zip_recruiter', 'glassdoor']
+    
+    console.log(`🔍 JobSpy: Searching "${searchTerm}" in ${sites.length} sites`)
+    
+    // Build request URL
+    const url = new URL(`${jobspyServiceUrl}/scrape`)
+    url.searchParams.set('search_term', searchTerm)
+    if (location) {
+      url.searchParams.set('location', location)
+    }
+    url.searchParams.set('results_wanted', '30') // Limit per site to avoid timeout
+    url.searchParams.set('site_name', sites.join(','))
+    url.searchParams.set('country', 'usa')
+    
+    if (minSalary !== null) {
+      url.searchParams.set('min_salary', minSalary.toString())
+    }
+    if (maxSalary !== null) {
+      url.searchParams.set('max_salary', maxSalary.toString())
+    }
+    
+    console.log(`📡 Calling JobSpy service: ${url.toString()}`)
+    
+    // Call JobSpy service with timeout
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
+    
+    try {
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json',
+        }
+      })
+      
+      clearTimeout(timeoutId)
+      
+      if (!response.ok) {
+        throw new Error(`JobSpy service error: HTTP ${response.status}`)
+      }
+      
+      const data = await response.json()
+      
+      if (!data.success) {
+        console.error(`❌ JobSpy error: ${data.error || 'Unknown error'}`)
+        return []
+      }
+      
+      console.log(`✅ JobSpy: Found ${data.count} jobs`)
+      
+      // Convert JobSpy response to our job format
+      for (const job of data.jobs || []) {
+        jobs.push({
+          id: job.id,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          posted_date: job.posted_date,
+          description: job.description || null,
+          url: job.url || null,
+          salary: job.salary || null,
+          job_type: job.job_type || null,
+        })
+      }
+      
+    } catch (fetchError) {
+      clearTimeout(timeoutId)
+      if (fetchError.name === 'AbortError') {
+        throw new Error('JobSpy service timeout')
+      }
+      throw fetchError
+    }
+    
+  } catch (error) {
+    console.error(`❌ JobSpy scraping failed: ${error instanceof Error ? error.message : String(error)}`)
+    // Don't throw - return empty array so other sources can still work
+  }
+  
+  return jobs
 }
 
 // Sample jobs function - NOT USED (removed to ensure only real scraped data is returned)

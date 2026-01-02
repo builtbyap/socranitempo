@@ -781,25 +781,31 @@ struct JobFilters {
         
         // Filter by specific locations
         if !locations.isEmpty {
+            let beforeLocationFilter = filtered.count
             filtered = filtered.filter { job in
                 return locations.contains { selectedLocation in
                     job.location.lowercased().contains(selectedLocation.lowercased()) ||
                     selectedLocation.lowercased().contains(job.location.lowercased())
                 }
             }
+            print("📍 Location filter (multiple): \(beforeLocationFilter) → \(filtered.count) jobs")
         } else if !location.isEmpty {
             // Fallback to single location filter
+            let beforeLocationFilter = filtered.count
             filtered = filtered.filter { job in
                 job.location.lowercased().contains(location.lowercased())
             }
+            print("📍 Location filter (single): \(beforeLocationFilter) → \(filtered.count) jobs")
         }
         
         // Filter by salary range (minimum and maximum)
         if minSalary != nil || maxSalary != nil {
+            let beforeSalaryFilter = filtered.count
             filtered = filtered.filter { job in
                 guard let salary = job.salary, !salary.lowercased().contains("not specified") else {
-                    // If no salary info, exclude it (user wants specific salary range)
-                    return false
+                    // If no salary info, include it (don't exclude jobs without salary info)
+                    // Only filter out jobs that have salary info but don't match the range
+                    return true
                 }
                 
                 // Extract salary range from string (e.g., "$120k - $150k", "$120,000 - $150,000", "$100k+")
@@ -914,6 +920,7 @@ struct JobFilters {
                 
                 return true
             }
+            print("💰 Salary filter: \(beforeSalaryFilter) → \(filtered.count) jobs (kept jobs without salary info)")
         }
         
         // Filter by experience level (based on title keywords)

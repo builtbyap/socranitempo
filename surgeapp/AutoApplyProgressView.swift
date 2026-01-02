@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct AutoApplyProgressView: View {
     let job: JobPost
@@ -20,6 +21,9 @@ struct AutoApplyProgressView: View {
     @State private var pendingQuestions: [PendingQuestion]? = nil
     @State private var showingQuestions = false
     @State private var applicationId: String? = nil
+    @State private var submitted: Bool = false
+    @State private var screenshot: String? = nil
+    @State private var showingScreenshot = false
     
     enum AutoApplyStep {
         case starting
@@ -34,40 +38,106 @@ struct AutoApplyProgressView: View {
             VStack(spacing: 32) {
                 if currentStep == .completed {
                     // Success View
-                    VStack(spacing: 24) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 80))
-                            .foregroundColor(.green)
-                        
-                        Text("Application Submitted!")
-                            .font(.system(size: 28, weight: .bold))
-                        
-                        VStack(spacing: 8) {
-                            Text("Successfully applied to")
-                                .font(.system(size: 16))
-                                .foregroundColor(.secondary)
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            Image(systemName: submitted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .font(.system(size: 80))
+                                .foregroundColor(submitted ? .green : .orange)
                             
-                            Text(job.title)
-                                .font(.system(size: 20, weight: .semibold))
+                            Text(submitted ? "Application Submitted!" : "Application Filled")
+                                .font(.system(size: 28, weight: .bold))
                             
-                            Text(job.company)
-                                .font(.system(size: 18))
-                                .foregroundColor(.secondary)
+                            VStack(spacing: 8) {
+                                Text(submitted ? "Successfully applied to" : "Form filled for")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.secondary)
+                                
+                                Text(job.title)
+                                    .font(.system(size: 20, weight: .semibold))
+                                
+                                Text(job.company)
+                                    .font(.system(size: 18))
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            // Status Details
+                            VStack(spacing: 12) {
+                                if filledFields > 0 {
+                                    HStack {
+                                        Image(systemName: "checkmark.circle")
+                                            .foregroundColor(.green)
+                                        Text("Filled \(filledFields) fields")
+                                            .font(.system(size: 14))
+                                    }
+                                }
+                                
+                                if !atsSystem.isEmpty && atsSystem != "unknown" {
+                                    HStack {
+                                        Image(systemName: "building.2")
+                                            .foregroundColor(.blue)
+                                        Text("ATS: \(atsSystem.capitalized)")
+                                            .font(.system(size: 14))
+                                    }
+                                }
+                                
+                                HStack {
+                                    Image(systemName: submitted ? "paperplane.fill" : "exclamationmark.circle")
+                                        .foregroundColor(submitted ? .green : .orange)
+                                    Text(submitted ? "Form submitted successfully" : "Form filled but not submitted automatically")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(submitted ? .green : .orange)
+                                }
+                                
+                                if !submitted {
+                                    Text("You may need to manually submit the application on the company's website.")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal)
+                                }
+                            }
+                            .padding()
+                            .background(Color(.systemGray6))
+                            .cornerRadius(12)
+                            
+                            // Screenshot Preview
+                            if let screenshot = screenshot {
+                                VStack(spacing: 8) {
+                                    Text("Verification Screenshot")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    
+                                    Button(action: {
+                                        showingScreenshot = true
+                                    }) {
+                                        if let imageData = Data(base64Encoded: screenshot),
+                                           let uiImage = UIImage(data: imageData) {
+                                            Image(uiImage: uiImage)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(maxHeight: 200)
+                                                .cornerRadius(8)
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .stroke(Color.blue, lineWidth: 2)
+                                                )
+                                        } else {
+                                            Text("View Screenshot")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.blue)
+                                        }
+                                    }
+                                    
+                                    Text("Tap to view full screenshot")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding()
+                                .background(Color(.systemGray6))
+                                .cornerRadius(12)
+                            }
                         }
-                        
-                        if filledFields > 0 {
-                            Text("Filled \(filledFields) fields")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        if !atsSystem.isEmpty && atsSystem != "unknown" {
-                            Text("ATS: \(atsSystem.capitalized)")
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
-                        }
+                        .padding()
                     }
-                    .padding()
                 } else if currentStep == .error {
                     // Error View
                     VStack(spacing: 24) {
@@ -145,6 +215,29 @@ struct AutoApplyProgressView: View {
                         ),
                         questions: questions
                     )
+                }
+            }
+            .sheet(isPresented: $showingScreenshot) {
+                if let screenshot = screenshot,
+                   let imageData = Data(base64Encoded: screenshot),
+                   let uiImage = UIImage(data: imageData) {
+                    NavigationStack {
+                        ScrollView {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                        }
+                        .navigationTitle("Application Screenshot")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarTrailing) {
+                                Button("Done") {
+                                    showingScreenshot = false
+                                }
+                            }
+                        }
+                    }
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ApplicationStatusUpdated"))) { _ in
@@ -247,6 +340,8 @@ struct AutoApplyProgressView: View {
                     await MainActor.run {
                         filledFields = result.filledFields
                         atsSystem = result.atsSystem
+                        submitted = result.submitted ?? false
+                        screenshot = result.screenshot
                         currentStep = .completed
                     }
                 } else if result.needsUserInput == true, let questions = result.questions, !questions.isEmpty {
@@ -276,9 +371,19 @@ struct AutoApplyProgressView: View {
                         showingQuestions = true
                     }
                 } else {
-                    await MainActor.run {
-                        errorMessage = result.error ?? "Application failed"
-                        currentStep = .error
+                    // Check if bot detection was encountered
+                    if result.botDetected == true {
+                        await MainActor.run {
+                            errorMessage = result.error ?? "Bot detection encountered. Please apply manually."
+                            screenshot = result.screenshot
+                            currentStep = .error
+                        }
+                    } else {
+                        await MainActor.run {
+                            errorMessage = result.error ?? "Application failed"
+                            screenshot = result.screenshot
+                            currentStep = .error
+                        }
                     }
                 }
             } catch {

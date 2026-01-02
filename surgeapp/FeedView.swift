@@ -26,14 +26,29 @@ struct FeedView: View {
     private var filteredJobPosts: [JobPost] {
         var jobs = allJobPosts
         
+        print("🔍 Filtering jobs:")
+        print("   - Total jobs: \(jobs.count)")
+        print("   - Applied job IDs: \(appliedJobIds.count)")
+        print("   - Passed job IDs: \(passedJobIds.count)")
+        print("   - Has active filters: \(filters.hasActiveFilters)")
+        
         // Filter out jobs that have been applied to or passed on
+        let beforeAppliedFilter = jobs.count
         jobs = jobs.filter { job in
             !appliedJobIds.contains(job.id) && !passedJobIds.contains(job.id)
         }
+        print("   - After removing applied/passed: \(jobs.count) (removed \(beforeAppliedFilter - jobs.count))")
         
         // Apply user filters if active
         if filters.hasActiveFilters {
+            let beforeFilter = jobs.count
             jobs = filters.apply(to: jobs)
+            print("   - After applying filters: \(jobs.count) (removed \(beforeFilter - jobs.count))")
+            
+            if jobs.isEmpty && beforeFilter > 0 {
+                print("⚠️ WARNING: All jobs filtered out! Filters may be too strict.")
+                print("   - Active filters: jobTitles=\(filters.jobTitles), jobTypes=\(filters.jobTypes), locations=\(filters.locations), minSalary=\(filters.minSalary?.description ?? "nil"), maxSalary=\(filters.maxSalary?.description ?? "nil")")
+            }
         }
         
         return jobs
