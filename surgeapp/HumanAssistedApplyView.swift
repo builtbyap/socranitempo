@@ -7,6 +7,7 @@
 
 import SwiftUI
 import WebKit
+import Combine
 
 struct HumanAssistedApplyView: View {
     let job: JobPost
@@ -19,12 +20,16 @@ struct HumanAssistedApplyView: View {
     @State private var filledFields: [FilledField] = []
     @State private var encounteredFriction: FrictionType?
     @State private var showFrictionAlert = false
+    @State private var isOnOAuthPage = false // Track if we're on OAuth page
+    @State private var originalApplicationURL: String? // Store original application URL
     
     enum AssistantStep {
         case loading
         case analyzing
         case filling
+        case uploadingResume
         case reviewing
+        case submitting
         case paused
         case blocked
         case completed
@@ -57,9 +62,11 @@ struct HumanAssistedApplyView: View {
                     statusBar
                     
                     // Live Video View of Browser (the actual employer application page)
-                    WebViewContainer(
+                    HumanAssistedWebViewContainer(
                         url: job.url ?? "",
                         assistant: assistant,
+                        originalURL: originalApplicationURL ?? job.url ?? "",
+                        isOnOAuthPage: $isOnOAuthPage,
                         onFrictionDetected: { friction in
                             handleFriction(friction)
                         },
@@ -72,6 +79,17 @@ struct HumanAssistedApplyView: View {
                         onResumeUploaded: {
                             // Show resume upload happening visibly
                             filledFields.append(FilledField(name: "Resume", value: "Uploaded"))
+                        },
+                        onOAuthCompleted: {
+                            // OAuth complete - resume automation
+                            print("🔄 Resuming automation after OAuth completion...")
+                            if currentStep == .blocked || isPaused {
+                                isPaused = false
+                                assistant.resume()
+                                currentStep = .analyzing
+                                // Re-detect ATS and continue
+                                detectATS()
+                            }
                         }
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -135,9 +153,29 @@ struct HumanAssistedApplyView: View {
             } message: { friction in
                 Text(friction.message)
             }
-            .onAppear {
-                startAssistedApplication()
-            }
+                    .onAppear {
+                        startAssistedApplication()
+                        
+                        // Listen for OAuth completion notification
+                        NotificationCenter.default.addObserver(
+                            forName: NSNotification.Name("OAuthCompleted"),
+                            object: nil,
+                            queue: .main
+                        ) { _ in
+                            // OAuth complete - resume automation
+                            print("🔄 Resuming automation after OAuth completion...")
+                            if currentStep == .blocked || isPaused {
+                                isPaused = false
+                                assistant.resume()
+                                currentStep = .analyzing
+                                // Re-detect ATS and continue
+                                detectATS()
+                            }
+                        }
+                    }
+                    .onDisappear {
+                        NotificationCenter.default.removeObserver(self, name: NSNotification.Name("OAuthCompleted"), object: nil)
+                    }
         }
     }
     
@@ -402,6 +440,7 @@ struct HumanAssistedApplyView: View {
     // MARK: - Functions
     private func startAssistedApplication() {
         currentStep = .loading
+        originalApplicationURL = job.url // Store original URL to detect when we return from OAuth
         
         // Step 1: Navigate to apply URL (visible in live browser view, like sorce.jobs)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
@@ -920,13 +959,16 @@ class FormAssistant: ObservableObject {
     }
 }
 
-// MARK: - Web View Container
-struct WebViewContainer: UIViewRepresentable {
+// MARK: - Web View Container (Human-Assisted)
+struct HumanAssistedWebViewContainer: UIViewRepresentable {
     let url: String
     let assistant: FormAssistant
+    let originalURL: String
+    @Binding var isOnOAuthPage: Bool
     let onFrictionDetected: (HumanAssistedApplyView.FrictionType) -> Void
     let onFieldFilled: ((String, String) -> Void)?
     let onResumeUploaded: (() -> Void)?
+    let onOAuthCompleted: (() -> Void)?
     
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
@@ -943,30 +985,80 @@ struct WebViewContainer: UIViewRepresentable {
     
     func makeCoordinator() -> Coordinator {
         Coordinator(
+            originalURL: originalURL,
+            isOnOAuthPage: $isOnOAuthPage,
             onFrictionDetected: onFrictionDetected,
             onFieldFilled: onFieldFilled,
-            onResumeUploaded: onResumeUploaded
+            onResumeUploaded: onResumeUploaded,
+            onOAuthCompleted: onOAuthCompleted
         )
     }
     
     class Coordinator: NSObject, WKNavigationDelegate {
+        let originalURL: String
+        @Binding var isOnOAuthPage: Bool
         let onFrictionDetected: (HumanAssistedApplyView.FrictionType) -> Void
         let onFieldFilled: ((String, String) -> Void)?
         let onResumeUploaded: (() -> Void)?
+        let onOAuthCompleted: (() -> Void)?
         
         init(
+            originalURL: String,
+            isOnOAuthPage: Binding<Bool>,
             onFrictionDetected: @escaping (HumanAssistedApplyView.FrictionType) -> Void,
             onFieldFilled: ((String, String) -> Void)?,
-            onResumeUploaded: (() -> Void)?
+            onResumeUploaded: (() -> Void)?,
+            onOAuthCompleted: (() -> Void)?
         ) {
+            self.originalURL = originalURL
+            self._isOnOAuthPage = isOnOAuthPage
             self.onFrictionDetected = onFrictionDetected
             self.onFieldFilled = onFieldFilled
             self.onResumeUploaded = onResumeUploaded
+            self.onOAuthCompleted = onOAuthCompleted
         }
         
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // Check if we've returned from OAuth (LinkedIn sign-in complete)
+            checkForOAuthCompletion(webView: webView)
+            
             // Check for friction points (human-in-the-loop moments, like sorce.jobs)
             checkForFriction(webView: webView)
+        }
+        
+        private func checkForOAuthCompletion(webView: WKWebView) {
+            guard let currentURL = webView.url?.absoluteString else { return }
+            
+            // Check if we're on an OAuth page (LinkedIn, Google, etc.)
+            let isOAuthPage = currentURL.contains("linkedin.com") ||
+                             currentURL.contains("accounts.google.com") ||
+                             currentURL.contains("/oauth/") ||
+                             currentURL.contains("/auth/") ||
+                             currentURL.contains("login")
+            
+            // Check if we've returned to the application form (OAuth complete)
+            let isBackOnApplicationForm = currentURL.contains(originalURL) ||
+                                         (currentURL.contains("lever.co") && !isOAuthPage) ||
+                                         (currentURL.contains("greenhouse.io") && !isOAuthPage) ||
+                                         (currentURL.contains("workday.com") && !isOAuthPage) ||
+                                         (currentURL.contains("apply") && !isOAuthPage) ||
+                                         (currentURL.contains("jobs") && !isOAuthPage && !currentURL.contains("linkedin.com"))
+            
+            // If we were on OAuth page and now we're back on the form, resume automation
+            if isOnOAuthPage && isBackOnApplicationForm {
+                print("✅ OAuth complete - returned to application form, resuming automation...")
+                DispatchQueue.main.async {
+                    // Update state
+                    self.isOnOAuthPage = false
+                    // Notify parent view to resume
+                    self.onOAuthCompleted?()
+                }
+            }
+            
+            // Update OAuth page state
+            DispatchQueue.main.async {
+                self.isOnOAuthPage = isOAuthPage
+            }
         }
         
         private func checkForFriction(webView: WKWebView) {

@@ -123,9 +123,44 @@ class SimpleApplyService {
         return coverLetter
     }
     
+    // MARK: - Create In Progress Application
+    func createInProgressApplication(job: JobPost, applicationData: ApplicationData) async throws -> Application {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        
+        // Create application with "in_progress" status
+        let application = Application(
+            id: UUID().uuidString,
+            jobPostId: job.id,
+            jobTitle: job.title,
+            company: job.company,
+            status: "in_progress",
+            appliedDate: dateFormatter.string(from: Date()),
+            resumeUrl: applicationData.resumeURL,
+            jobUrl: job.url,
+            pendingQuestions: nil
+        )
+        
+        // Save to Supabase
+        try await SupabaseService.shared.insertApplication(application)
+        
+        print("✅ In-progress application created: \(application.id)")
+        
+        // Notify that application was created
+        NotificationCenter.default.post(name: NSNotification.Name("ApplicationStatusUpdated"), object: nil)
+        
+        return application
+    }
+    
     // MARK: - Submit Application
     func submitApplication(job: JobPost, applicationData: ApplicationData) async throws {
         try await submitApplicationWithQuestions(job: job, applicationData: applicationData, questions: nil)
+    }
+    
+    // MARK: - Update Application Status
+    func updateApplicationStatus(applicationId: String, status: String) async throws {
+        try await SupabaseService.shared.updateApplicationStatus(applicationId: applicationId, status: status)
+        NotificationCenter.default.post(name: NSNotification.Name("ApplicationStatusUpdated"), object: nil)
     }
     
     // MARK: - Submit Application with Questions

@@ -218,26 +218,74 @@ struct FeedView: View {
     
     // MARK: - Handle Apply
     private func handleApply(to post: JobPost) {
-        // Use Human-Assisted Apply (slow, visible, user-controlled)
-        // This follows human behavior patterns and stops at friction
-        if let jobURL = post.url, !jobURL.isEmpty {
-            // Get application data
-            let profileData = SimpleApplyService.shared.getUserProfileData()
-            let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
-            applicationData = appData
-            
-            // Show human-assisted apply view (visible, slow, user-controlled)
-            showingSimpleApply = post
-        } else {
-            // No URL, show review screen instead
-            let profileData = SimpleApplyService.shared.getUserProfileData()
-            let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
-            applicationData = appData
-            showingSimpleApply = post
+        // Get application data
+        let profileData = SimpleApplyService.shared.getUserProfileData()
+        let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
+        applicationData = appData
+        
+        // Create in_progress application immediately (like sorce.jobs)
+        Task {
+            do {
+                let application = try await SimpleApplyService.shared.createInProgressApplication(
+                    job: post,
+                    applicationData: appData
+                )
+                
+                // Start automation in background if job has URL
+                if let jobURL = post.url, !jobURL.isEmpty {
+                    // Start background automation with live stream
+                    await startBackgroundAutomation(job: post, application: application, applicationData: appData)
+                } else {
+                    // No URL - update status to pending_questions or show review
+                    try await SimpleApplyService.shared.updateApplicationStatus(
+                        applicationId: application.id,
+                        status: "pending_questions"
+                    )
+                }
+            } catch {
+                print("⚠️ Failed to create in-progress application: \(error.localizedDescription)")
+            }
         }
         
-        // Move to next job after applying
+        // Move to next job immediately (user can continue swiping)
         moveToNextJob()
+    }
+    
+    // MARK: - Start Background Automation
+    private func startBackgroundAutomation(
+        job: JobPost,
+        application: Application,
+        applicationData: ApplicationData
+    ) async {
+        // Start automation via AutoApplyService (which uses Playwright with live streaming)
+        do {
+            let result = try await AutoApplyService.shared.autoApply(
+                job: job,
+                applicationData: applicationData
+            )
+            
+            // Update application status based on result
+            let newStatus: String
+            if result.submitted == true {
+                newStatus = "applied"
+            } else if let questions = result.questions, !questions.isEmpty {
+                newStatus = "pending_questions"
+            } else {
+                newStatus = "applied" // Form filled but may need manual submission
+            }
+            
+            try await SimpleApplyService.shared.updateApplicationStatus(
+                applicationId: application.id,
+                status: newStatus
+            )
+        } catch {
+            print("⚠️ Background automation failed: \(error.localizedDescription)")
+            // Update status to indicate failure or need manual intervention
+            try? await SimpleApplyService.shared.updateApplicationStatus(
+                applicationId: application.id,
+                status: "pending_questions"
+            )
+        }
     }
     
     // MARK: - Handle Pass

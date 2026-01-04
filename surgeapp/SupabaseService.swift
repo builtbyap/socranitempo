@@ -370,6 +370,36 @@ class SupabaseService {
         }
     }
     
+    func updateApplicationStatus(applicationId: String, status: String) async throws {
+        guard supabaseURL != "YOUR_SUPABASE_URL" else {
+            throw SupabaseError.notConfigured
+        }
+        
+        guard let url = URL(string: "\(supabaseURL)/rest/v1/applications?id=eq.\(applicationId)") else {
+            throw SupabaseError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue(supabaseKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(supabaseKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("public", forHTTPHeaderField: "Accept-Profile")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        
+        let jsonDict: [String: Any] = ["status": status]
+        let updateData = try JSONSerialization.data(withJSONObject: jsonDict)
+        request.httpBody = updateData
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw SupabaseError.requestFailed
+        }
+    }
+    
     // MARK: - Helper: Decode Application with missing fields handling
     private func decodeApplication(from json: [String: Any]) throws -> Application {
         let dateFormatter = DateFormatter()

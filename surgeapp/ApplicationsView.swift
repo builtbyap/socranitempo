@@ -16,6 +16,7 @@ struct ApplicationsView: View {
     
     enum ApplicationSection: String, Identifiable {
         case attention = "attention"
+        case inProgress = "in_progress"
         case submitted = "submitted"
         case pending = "pending"
         case failed = "failed"
@@ -31,8 +32,14 @@ struct ApplicationsView: View {
             application.status == "interview" || 
             application.status == "rejected" || 
             application.status == "accepted" ||
-            application.status == "pending_questions"
+            application.status == "pending_questions" ||
+            application.status == "in_progress"
         }
+    }
+    
+    // In Progress applications (currently being filled out)
+    var inProgressApplications: [Application] {
+        return applications.filter { $0.status == "in_progress" }
     }
     
     // Applications with pending questions (for notifications)
@@ -127,6 +134,41 @@ struct ApplicationsView: View {
                             .padding(.horizontal, 20)
                         }
                         
+                        // In Progress Section (applications currently being filled)
+                        if !inProgressApplications.isEmpty {
+                            VStack(alignment: .leading, spacing: 16) {
+                                HStack {
+                                    Text("In Progress")
+                                        .font(.system(size: 24, weight: .bold))
+                                    
+                                    Spacer()
+                                    
+                                    Button(action: {
+                                        selectedSection = .inProgress
+                                    }) {
+                                        Text("See all")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.blue)
+                                        + Text(" >")
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundColor(.blue)
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                                
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 12) {
+                                        ForEach(inProgressApplications.prefix(5)) { application in
+                                            InProgressApplicationCard(application: application)
+                                                .frame(width: 320)
+                                        }
+                                    }
+                                    .padding(.horizontal, 20)
+                                }
+                            }
+                            .padding(.vertical, 16)
+                        }
+                        
                         // Summary Section
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Summary")
@@ -134,6 +176,16 @@ struct ApplicationsView: View {
                                 .padding(.horizontal, 20)
                             
                             HStack(spacing: 12) {
+                                // In Progress Card
+                                SummaryCard(
+                                    icon: "arrow.clockwise.circle.fill",
+                                    title: "In Progress",
+                                    count: inProgressApplications.count,
+                                    color: .purple
+                                ) {
+                                    selectedSection = .inProgress
+                                }
+                                
                                 // Submitted Card
                                 SummaryCard(
                                     icon: "checkmark.circle.fill",
@@ -284,6 +336,8 @@ struct ApplicationsView: View {
         switch section {
         case .attention:
             return pendingQuestionsApplications
+        case .inProgress:
+            return inProgressApplications
         case .submitted:
             return submittedApplications
         case .pending:
@@ -523,6 +577,7 @@ struct SectionDetailView: View {
     var sectionTitle: String {
         switch section {
         case .attention: return "Action Required"
+        case .inProgress: return "In Progress"
         case .submitted: return "Submitted"
         case .pending: return "Pending"
         case .failed: return "Failed Applications"
@@ -538,6 +593,12 @@ struct SectionDetailView: View {
                         // Show pending questions cards
                         ForEach(applications) { application in
                             PendingQuestionsCard(application: application)
+                                .padding(.horizontal, 20)
+                        }
+                    } else if section == .inProgress {
+                        // Show in progress cards with live stream
+                        ForEach(applications) { application in
+                            InProgressApplicationCard(application: application)
                                 .padding(.horizontal, 20)
                         }
                     } else if section == .passed {

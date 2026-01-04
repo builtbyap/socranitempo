@@ -18,10 +18,23 @@ serve(async (req) => {
     const careerInterestsParam = url.searchParams.get('career_interests')
     const minSalaryParam = url.searchParams.get('min_salary')
     const maxSalaryParam = url.searchParams.get('max_salary')
+    const jobTypeParam = url.searchParams.get('job_type') || url.searchParams.get('jobType') // Support both formats
     
     // Normalize location - if empty or "none", use empty string (will search all locations)
     if (location.toLowerCase() === 'none' || location.trim() === '') {
       location = ''
+    }
+    
+    // Normalize job_type (internship, fulltime, parttime, contract)
+    let jobType: string | null = null
+    if (jobTypeParam) {
+      const normalized = jobTypeParam.toLowerCase().trim()
+      if (['internship', 'fulltime', 'parttime', 'contract', 'full-time', 'part-time'].includes(normalized)) {
+        // Map to standard format
+        if (normalized === 'full-time') jobType = 'fulltime'
+        else if (normalized === 'part-time') jobType = 'parttime'
+        else jobType = normalized
+      }
     }
     
     let careerInterests: string[] = []
@@ -45,6 +58,7 @@ serve(async (req) => {
     console.log(`   - Keywords: "${keywords}"`)
     console.log(`   - Location: "${location || 'all locations'}"`)
     console.log(`   - Career Interests: ${JSON.stringify(careerInterests)}`)
+    console.log(`   - Job Type: ${jobType || 'all types'}`)
     console.log(`   - Salary Range: ${minSalary ? `$${minSalary}k` : 'no min'} - ${maxSalary ? `$${maxSalary}k` : 'no max'}`)
 
     const allJobs: any[] = []
@@ -112,12 +126,15 @@ serve(async (req) => {
         try {
           console.log(`⏳ Starting ${source.name} for "${query}"...`)
           // Pass career interests to Workday scraping function for proper filtering
-          // Pass all filter params to JobSpy
+          // Pass all filter params to JobSpy (including job_type)
+          // Pass job_type to The Muse and Workday for proper filtering
           const jobs = await Promise.race([
             source.name === 'Workday' ? 
-              (source.fn as any)(query, location, careerInterests) :
+              (source.fn as any)(query, location, careerInterests, jobType) :
             source.name === 'JobSpy' ?
-              (source.fn as any)(query, location, minSalary, maxSalary, careerInterests) :
+              (source.fn as any)(query, location, minSalary, maxSalary, careerInterests, jobType) :
+            source.name === 'The Muse' ?
+              (source.fn as any)(query, location, jobType) :
               source.fn(query, location),
             new Promise<any[]>((_, reject) => 
               setTimeout(() => reject(new Error('Source timeout')), 120000) // 120 second timeout per source (Playwright needs more time)
@@ -203,13 +220,22 @@ serve(async (req) => {
     // Deduplicate jobs and ensure no test data
     const uniqueJobs = deduplicateJobs(allJobs).filter(job => {
       // Final check to ensure no test data
-      return !job.id?.includes('sample_') && 
-             !job.url?.includes('example.com') &&
-             job.company?.toLowerCase() !== 'tech corp' &&
-             job.company?.toLowerCase() !== 'analytics inc'
+      const isTestData = job.id?.includes('sample_') || 
+                         job.url?.includes('example.com') ||
+                         job.company?.toLowerCase() === 'tech corp' ||
+                         job.company?.toLowerCase() === 'analytics inc'
+      
+      // Filter out Adzuna URLs (job boards aggregate from multiple sources)
+      const isAdzunaURL = job.url && typeof job.url === 'string' && job.url.toLowerCase().includes('adzuna')
+      
+      if (isAdzunaURL) {
+        console.log(`🚫 Filtered out Adzuna job in final deduplication: ${job.title} at ${job.company}`)
+      }
+      
+      return !isTestData && !isAdzunaURL
     })
     
-    console.log(`📊 Final job count: ${uniqueJobs.length} real jobs (all test data filtered out)`)
+    console.log(`📊 Final job count: ${uniqueJobs.length} real jobs (all test data and Adzuna URLs filtered out)`)
     
     // Skip section extraction for now to avoid timeout/parsing issues
     // Sections can be extracted on-demand when viewing a specific job
@@ -329,12 +355,19 @@ serve(async (req) => {
 })
 
 // The Muse API - Scrapes jobs from The Muse job board
-async function scrapeTheMuse(keywords: string, location: string): Promise<any[]> {
+async function scrapeTheMuse(keywords: string, location: string, jobType: string | null = null): Promise<any[]> {
   const jobs: any[] = []
   
   try {
     // The Muse has a public API endpoint (no auth required for basic searches)
     // Format: https://www.themuse.com/api/public/jobs?page=1&category={category}&location={location}
+    
+    // If job_type is internship, add "internship" to the search query
+    let searchKeywords = keywords
+    if (jobType === 'internship') {
+      searchKeywords = keywords ? `${keywords} internship` : 'internship'
+      console.log(`🎯 The Muse: Filtering for internships - search: "${searchKeywords}"`)
+    }
     
     // Map keywords to The Muse categories
     const categoryMap: { [key: string]: string } = {
@@ -365,9 +398,9 @@ async function scrapeTheMuse(keywords: string, location: string): Promise<any[]>
     // Build The Muse API URL
     const locationParam = location || 'United States'
     const baseUrl = 'https://www.themuse.com/api/public/jobs'
-    const url = `${baseUrl}?page=1&category=${encodeURIComponent(category)}&location=${encodeURIComponent(locationParam)}&search=${encodeURIComponent(keywords)}`
+    const url = `${baseUrl}?page=1&category=${encodeURIComponent(category)}&location=${encodeURIComponent(locationParam)}&search=${encodeURIComponent(searchKeywords)}`
     
-    console.log(`   🎨 The Muse: Searching for "${keywords}" in category "${category}" at "${locationParam}"`)
+    console.log(`   🎨 The Muse: Searching for "${searchKeywords}" in category "${category}" at "${locationParam}"`)
     
     const response = await fetch(url, {
       headers: {
@@ -987,7 +1020,7 @@ async function scrapeLever(keywords: string, location: string): Promise<any[]> {
 }
 
 // Scrape Workday (ATS) using Workday's internal JSON API (like sorce.jobs)
-async function scrapeWorkday(keywords: string, location: string, careerInterests: string[] = []): Promise<any[]> {
+async function scrapeWorkday(keywords: string, location: string, careerInterests: string[] = [], jobType: string | null = null): Promise<any[]> {
   const jobs: any[] = []
   
   try {
@@ -1029,6 +1062,13 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
         console.log(`   🔍 ${tenant}: Calling Workday JSON API: ${apiUrl}`)
         
         // Build filter payload matching Workday's EXACT format
+        // If job_type is internship, add "internship" to the search query
+        let searchText = keywords || ''
+        if (jobType === 'internship') {
+          searchText = keywords ? `${keywords} internship` : 'internship'
+          console.log(`🎯 Workday ${tenant}: Filtering for internships - searchText: "${searchText}"`)
+        }
+        
         // Workday uses different payload structures per company - we'll detect and use the working one
         // Start with minimal format (most common), then try alternatives if needed
         let workingPayloadFormat: any = null
@@ -1037,14 +1077,14 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
         const format1: any = {
           limit: 20,
           offset: 0,
-          searchText: keywords || ''
+          searchText: searchText
         }
         
         // Format 2: With empty appliedFacets
         const format2: any = {
           limit: 20,
           offset: 0,
-          searchText: keywords || '',
+          searchText: searchText,
           appliedFacets: {}
         }
         
@@ -1052,7 +1092,7 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
         const format3: any = {
           limit: 20,
           offset: 0,
-          searchText: keywords || '',
+          searchText: searchText,
           filters: []
         }
         
@@ -1060,7 +1100,7 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
         const format4: any = {
           limit: 20,
           offset: 0,
-          query: keywords || ''
+          query: searchText
         }
         
         // Add location to formats if provided (valid location only)
@@ -1096,8 +1136,8 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
           }
           
           // Also add to format1 as searchText (fallback if appliedFacets doesn't work)
-          // But keep the original keywords too
-          format1.searchText = keywords ? `${keywords} ${workdayJobFamilies.join(' ')}` : workdayJobFamilies.join(' ')
+          // But keep the original searchText (which may include "internship" if job_type is internship)
+          format1.searchText = searchText ? `${searchText} ${workdayJobFamilies.join(' ')}` : workdayJobFamilies.join(' ')
           
           console.log(`   🎯 ${tenant}: Adding career interests as Workday filters: ${workdayJobFamilies.join(', ')}`)
         }
@@ -1105,7 +1145,7 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
         // Start with format1 (most common)
         let filterPayload = format1
         
-        console.log(`   🔍 ${tenant}: Filter payload - searchText: "${keywords || ''}", location: "${validLocation ? location : 'none'}", careerInterests: ${careerInterests.length > 0 ? careerInterests.join(', ') : 'none'}`)
+        console.log(`   🔍 ${tenant}: Filter payload - searchText: "${searchText}", location: "${validLocation ? location : 'none'}", jobType: "${jobType || 'all'}", careerInterests: ${careerInterests.length > 0 ? careerInterests.join(', ') : 'none'}`)
         
         // Paginate through all jobs
         let offset = 0
@@ -1160,7 +1200,7 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
                 const simplePayload: any = {
                   limit: 20,
                   offset: offset,
-                  searchText: keywords || ''
+                  searchText: searchText
                 }
                 
                 // Only add location if it's a valid location (not "all" or empty)
@@ -2033,7 +2073,8 @@ async function fetchFromJobSpy(
   location: string,
   minSalary: number | null = null,
   maxSalary: number | null = null,
-  careerInterests: string[] = []
+  careerInterests: string[] = [],
+  jobType: string | null = null
 ): Promise<any[]> {
   const jobs: any[] = []
   
@@ -2057,6 +2098,10 @@ async function fetchFromJobSpy(
     url.searchParams.set('search_term', searchTerm)
     if (location) {
       url.searchParams.set('location', location)
+    }
+    if (jobType) {
+      url.searchParams.set('job_type', jobType) // Pass job_type to JobSpy (internship, fulltime, parttime, contract)
+      console.log(`🎯 JobSpy: Filtering for job type: ${jobType}`)
     }
     url.searchParams.set('results_wanted', '30') // Limit per site to avoid timeout
     url.searchParams.set('site_name', sites.join(','))
@@ -2100,7 +2145,14 @@ async function fetchFromJobSpy(
       console.log(`✅ JobSpy: Found ${data.count} jobs`)
       
       // Convert JobSpy response to our job format
+      // Filter out Adzuna URLs (job boards aggregate from multiple sources)
       for (const job of data.jobs || []) {
+        // Skip jobs with Adzuna URLs
+        if (job.url && typeof job.url === 'string' && job.url.toLowerCase().includes('adzuna')) {
+          console.log(`🚫 Filtered out Adzuna job: ${job.title} at ${job.company}`)
+          continue
+        }
+        
         jobs.push({
           id: job.id,
           title: job.title,
@@ -2113,6 +2165,8 @@ async function fetchFromJobSpy(
           job_type: job.job_type || null,
         })
       }
+      
+      console.log(`✅ JobSpy: After filtering Adzuna URLs: ${jobs.length} jobs`)
       
     } catch (fetchError) {
       clearTimeout(timeoutId)
