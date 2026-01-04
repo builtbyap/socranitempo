@@ -35,6 +35,7 @@ interface AutoApplyRequest {
   company: string
   applicationData: ApplicationData
   answers?: { [key: string]: string } // Answers to questions (key is question index as string)
+  streamSessionId?: string // Session ID for live streaming
 }
 
 // Call Fly.io Playwright service
@@ -60,7 +61,8 @@ async function automateWithFlyService(
       body: JSON.stringify({
         jobUrl,
         applicationData,
-        answers: answers || undefined
+        answers: answers || undefined,
+        streamSessionId: request.streamSessionId || undefined // Pass through session ID for streaming
       })
     })
     

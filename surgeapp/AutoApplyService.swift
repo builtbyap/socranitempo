@@ -58,11 +58,15 @@ class AutoApplyService {
             "resumeUrl": applicationData.resumeURL ?? ""
         ]
         
+        // Generate session ID for live streaming
+        let streamSessionId = UUID().uuidString
+        
         var requestBody: [String: Any] = [
             "jobUrl": job.url ?? "",
             "jobTitle": job.title,
             "company": job.company,
-            "applicationData": appDataDict
+            "applicationData": appDataDict,
+            "streamSessionId": streamSessionId // Pass session ID for live streaming
         ]
         
         // Add base64 resume if available
@@ -73,6 +77,17 @@ class AutoApplyService {
                 requestBody["applicationData"] = appData
             }
         }
+        
+        // Start SSE stream connection BEFORE making the request
+        // This ensures the stream endpoint is ready when automation starts
+        print("📡 Connecting to live stream: \(streamSessionId)")
+        SSEStreamService.shared.connect(
+            sessionId: streamSessionId,
+            serviceURL: Config.playwrightServiceURL
+        )
+        
+        // Give the stream a moment to establish connection
+        try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
         
         var request = URLRequest(url: backendURL)
         request.httpMethod = "POST"

@@ -6,13 +6,117 @@ const { chromium } = require('playwright');
 const cors = require('cors');
 const app = express();
 
+// Helper function to get proxy configuration (like sorce.jobs)
+function getProxyConfig() {
+  const proxyEnabled = process.env.PROXY_ENABLED === 'true';
+  
+  if (!proxyEnabled) {
+    return null; // No proxy configured
+  }
+  
+  const endpoint = process.env.PROXY_ENDPOINT; // e.g., "gate.smartproxy.com:7000"
+  const username = process.env.PROXY_USERNAME;
+  const password = process.env.PROXY_PASSWORD;
+  
+  if (!endpoint || !username || !password) {
+    console.log('⚠️ Proxy enabled but credentials missing - running without proxy');
+    return null;
+  }
+  
+  // Format: http://username:password@host:port
+  const proxyServer = `http://${username}:${password}@${endpoint}`;
+  
+  return {
+    server: proxyServer,
+    username,
+    password
+  };
+}
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Store active streams (sessionId -> response object)
+const activeStreams = new Map();
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'playwright-automation' });
 });
+
+// SSE endpoint for live streaming
+app.get('/stream/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  
+  console.log(`📡 SSE stream connection request for session: ${sessionId}`);
+  
+  // Set headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable buffering for nginx
+  
+  // Store the response for this session
+  activeStreams.set(sessionId, res);
+  console.log(`✅ Registered stream for session: ${sessionId} (total active: ${activeStreams.size})`);
+  
+  // Send initial connection message
+  try {
+    res.write(`data: ${JSON.stringify({ type: 'connected', sessionId, timestamp: Date.now() })}\n\n`);
+  } catch (error) {
+    console.error(`Error sending initial connection message:`, error);
+  }
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    console.log(`📡 Client disconnected from stream: ${sessionId}`);
+    activeStreams.delete(sessionId);
+    if (!res.destroyed) {
+      res.end();
+    }
+  });
+  
+  req.on('error', (error) => {
+    console.error(`📡 Stream error for ${sessionId}:`, error);
+    activeStreams.delete(sessionId);
+  });
+});
+
+// Helper function to send frame to stream
+function sendFrame(sessionId, frameData, metadata = {}) {
+  const res = activeStreams.get(sessionId);
+  if (res && !res.destroyed) {
+    try {
+      res.write(`data: ${JSON.stringify({ 
+        type: 'frame', 
+        frame: frameData,
+        timestamp: Date.now(),
+        ...metadata
+      })}\n\n`);
+    } catch (error) {
+      console.error(`Error sending frame to ${sessionId}:`, error);
+      activeStreams.delete(sessionId);
+    }
+  }
+}
+
+// Helper function to send event to stream
+function sendEvent(sessionId, eventType, data = {}) {
+  const res = activeStreams.get(sessionId);
+  if (res && !res.destroyed) {
+    try {
+      res.write(`data: ${JSON.stringify({ 
+        type: eventType,
+        timestamp: Date.now(),
+        ...data
+      })}\n\n`);
+    } catch (error) {
+      console.error(`Error sending event to ${sessionId}:`, error);
+      activeStreams.delete(sessionId);
+    }
+  }
+}
 
 // Main automation endpoint
 app.post('/automate', async (req, res) => {
@@ -24,7 +128,7 @@ app.post('/automate', async (req, res) => {
   let page = null;
   
   try {
-    const { jobUrl, applicationData, answers } = req.body;
+    const { jobUrl, applicationData, answers, streamSessionId } = req.body;
     
     if (!jobUrl || !applicationData) {
       return res.status(400).json({ 
@@ -35,30 +139,66 @@ app.post('/automate', async (req, res) => {
     
     console.log(`🚀 Starting automation for: ${jobUrl}`);
     
-    // Check if this is an Adzuna job (they have strict bot detection)
-    const isAdzuna = jobUrl.toLowerCase().includes('adzuna.com');
+    // Configure residential proxy (like sorce.jobs)
+    const proxyConfig = getProxyConfig();
+    const launchArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled', // Hide automation flags
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-web-security',
+      '--disable-features=VizDisplayCompositor'
+    ];
+    
+    // Add proxy server if configured
+    if (proxyConfig && proxyConfig.server) {
+      launchArgs.push(`--proxy-server=${proxyConfig.server}`);
+      console.log(`🌐 Using residential proxy: ${proxyConfig.server.replace(/:[^:]*$/, ':****')}`);
+    }
     
     browser = await chromium.launch({
       headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled', // Hide automation flags
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor'
-      ]
+      args: launchArgs
     });
     
-    // More realistic browser context with better fingerprinting
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      viewport: { width: 1920, height: 1080 },
+    // Rotate user agents and fingerprints to avoid detection (like sorce.jobs)
+    const userAgents = [
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    ];
+    
+    const viewports = [
+      { width: 1920, height: 1080 },
+      { width: 1366, height: 768 },
+      { width: 1536, height: 864 },
+      { width: 1440, height: 900 },
+      { width: 1280, height: 720 }
+    ];
+    
+    const timezones = [
+      { id: 'America/New_York', lat: 40.7128, lon: -74.0060 },
+      { id: 'America/Los_Angeles', lat: 34.0522, lon: -118.2437 },
+      { id: 'America/Chicago', lat: 41.8781, lon: -87.6298 },
+      { id: 'America/Denver', lat: 39.7392, lon: -104.9903 }
+    ];
+    
+    // Randomly select fingerprint
+    const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+    const randomViewport = viewports[Math.floor(Math.random() * viewports.length)];
+    const randomTz = timezones[Math.floor(Math.random() * timezones.length)];
+    
+    // More realistic browser context with rotated fingerprinting (like sorce.jobs)
+    const contextOptions = {
+      userAgent: randomUA,
+      viewport: randomViewport,
       locale: 'en-US',
-      timezoneId: 'America/New_York',
+      timezoneId: randomTz.id,
       permissions: ['geolocation'],
-      geolocation: { latitude: 40.7128, longitude: -74.0060 }, // NYC coordinates
+      geolocation: { latitude: randomTz.lat, longitude: randomTz.lon },
       colorScheme: 'light',
       // Add extra headers to look more like a real browser
       extraHTTPHeaders: {
@@ -74,10 +214,16 @@ app.post('/automate', async (req, res) => {
         'Sec-Fetch-User': '?1',
         'Cache-Control': 'max-age=0'
       }
-    });
+    };
     
-    // Remove webdriver property to avoid detection
+    // Add proxy to context if configured (Playwright handles proxy auth via launch args)
+    // The proxy is already set in launch args, so we don't need to set it here
+    
+    const context = await browser.newContext(contextOptions);
+    
+    // Remove webdriver property and add more anti-detection measures
     await context.addInitScript(() => {
+      // Remove webdriver property
       Object.defineProperty(navigator, 'webdriver', {
         get: () => false,
       });
@@ -104,11 +250,40 @@ app.post('/automate', async (req, res) => {
           Promise.resolve({ state: Notification.permission }) :
           originalQuery(parameters)
       );
+      
+      // Add more realistic properties
+      Object.defineProperty(navigator, 'hardwareConcurrency', {
+        get: () => 8,
+      });
+      
+      Object.defineProperty(navigator, 'deviceMemory', {
+        get: () => 8,
+      });
+      
+      // Override getBattery if it exists
+      if (navigator.getBattery) {
+        navigator.getBattery = () => Promise.resolve({
+          charging: true,
+          chargingTime: 0,
+          dischargingTime: Infinity,
+          level: 1.0
+        });
+      }
+      
+      // Remove automation indicators
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
     });
     
     page = await context.newPage();
     
     console.log(`🌐 Navigating to: ${jobUrl}`);
+    
+    // Send navigation event if streaming
+    if (streamSessionId) {
+      sendEvent(streamSessionId, 'navigating', { url: jobUrl });
+    }
     
     // Follow redirects and wait for final page to load
     try {
@@ -117,13 +292,41 @@ app.post('/automate', async (req, res) => {
         timeout: 20000 
       });
       
+      // Add human-like delay and mouse movement to avoid detection
+      await page.waitForTimeout(1000 + Math.random() * 2000); // Random delay 1-3 seconds
+      
+      // Simulate human-like mouse movement
+      try {
+        await page.mouse.move(100, 100);
+        await page.waitForTimeout(200);
+        await page.mouse.move(200, 200);
+        await page.waitForTimeout(200);
+      } catch (e) {
+        // Ignore mouse movement errors
+      }
+      
       // Wait for any redirects to complete
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(2000);
       
       // Check if URL changed (redirect happened)
       const finalUrl = page.url();
       if (finalUrl !== jobUrl) {
         console.log(`🔄 Redirected from ${jobUrl} to ${finalUrl}`);
+        // Wait a bit more after redirect
+        await page.waitForTimeout(2000);
+      }
+      
+      // Send frame after navigation if streaming
+      if (streamSessionId) {
+        try {
+          const screenshot = await page.screenshot({ encoding: 'base64' });
+          sendFrame(streamSessionId, screenshot.toString('base64'), { 
+            step: 'navigated',
+            url: finalUrl 
+          });
+        } catch (e) {
+          console.log('⚠️ Failed to capture navigation screenshot:', e.message);
+        }
       }
     } catch (error) {
       console.log(`⚠️ Navigation error: ${error.message}`);
@@ -133,28 +336,69 @@ app.post('/automate', async (req, res) => {
     // Wait a bit for page to fully load
     await page.waitForTimeout(2000);
     
-    // Check for bot detection pages (especially Adzuna)
+    // Check for bot detection pages
     const pageContent = await page.content();
     const pageText = await page.textContent('body').catch(() => '');
     const currentUrl = page.url();
     
-    // Detect Adzuna's bot detection page
-    if (pageText.includes('suspicious behaviour') || 
-        pageText.includes('suspicious behavior') ||
-        pageText.includes('unusual behaviour') ||
-        pageText.includes('unusual behavior') ||
-        (currentUrl.includes('adzuna.com') && (pageText.includes('detected') || pageText.includes('suspicious')))) {
-      console.log('⚠️ Bot detection page detected (likely Adzuna)');
+    // Detect bot detection pages - be more specific to avoid false positives
+    // Only trigger if we see clear bot detection messages AND can't proceed
+    const botDetectionKeywords = [
+      'suspicious behaviour',
+      'suspicious behavior', 
+      'unusual behaviour',
+      'unusual behavior',
+      'automated access detected',
+      'bot detected',
+      'access denied',
+      'blocked',
+      'verify you are human',
+      'captcha'
+    ];
+    
+    const hasBotDetectionKeyword = botDetectionKeywords.some(keyword => 
+      pageText.toLowerCase().includes(keyword.toLowerCase())
+    );
+    
+    // Also check if page has CAPTCHA or verification elements
+    const hasCaptcha = await page.$('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], .g-recaptcha, #captcha, [class*="captcha"]').catch(() => null);
+    
+    // Check if we have form fields to fill (if yes, we can still try to proceed)
+    const hasFormFields = await page.$('input:not([type="hidden"]), textarea, select').catch(() => null);
+    
+    // Only block if we have bot detection AND no form fields (can't proceed)
+    const isBotDetectionPage = hasBotDetectionKeyword && !hasFormFields;
+    
+    // If we have bot detection but also have form fields, try to proceed anyway
+    if (hasBotDetectionKeyword && hasFormFields) {
+      console.log('⚠️ Bot detection warning detected, but form fields are present - attempting to proceed');
+    }
+    
+    // Only block if we're actually on a bot detection page with no way to proceed
+    if (isBotDetectionPage || (hasCaptcha && !hasFormFields)) {
+      console.log('⚠️ Bot detection page detected');
       const screenshot = await page.screenshot({ encoding: 'base64' });
       
       await browser.close();
       browser = null;
       
+      // Determine which site detected the bot (generic message, don't call out specific sites)
+      let siteName = 'job board';
+      if (currentUrl.includes('indeed.com')) {
+        siteName = 'Indeed';
+      } else if (currentUrl.includes('linkedin.com')) {
+        siteName = 'LinkedIn';
+      } else if (currentUrl.includes('glassdoor.com')) {
+        siteName = 'Glassdoor';
+      } else if (currentUrl.includes('ziprecruiter.com')) {
+        siteName = 'ZipRecruiter';
+      }
+      
       return res.json({
         success: false,
         filledFields: 0,
-        atsSystem: 'adzuna',
-        error: 'Bot detection: This job board (Adzuna) has detected automated access. Please apply manually through the website.',
+        atsSystem: siteName.toLowerCase(),
+        error: `Bot detection: This job board has detected automated access. Please apply manually through the website.`,
         screenshot: screenshot.toString('base64'),
         questions: [],
         needsUserInput: false,
@@ -163,14 +407,16 @@ app.post('/automate', async (req, res) => {
       });
     }
     
+    // If we're on a job board listing page, try to follow redirect to actual application form
+    // (handled by the job board listing detection code below)
+    
     // Detect ATS system
     const atsSystem = detectATSSystem(jobUrl, pageContent);
     console.log(`🔍 Detected ATS: ${atsSystem}`);
     
     // Check if we're on a job board listing page (not an application form)
     const currentUrlAfterLoad = page.url();
-    const isJobBoardListing = currentUrlAfterLoad.includes('adzuna.com') ||
-                             currentUrlAfterLoad.includes('indeed.com') ||
+    const isJobBoardListing = currentUrlAfterLoad.includes('indeed.com') ||
                              currentUrlAfterLoad.includes('monster.com') ||
                              currentUrlAfterLoad.includes('glassdoor.com') ||
                              currentUrlAfterLoad.includes('ziprecruiter.com') ||
@@ -295,8 +541,7 @@ app.post('/automate', async (req, res) => {
           const newUrl = page.url();
           
           // Check if we're still on a listing page
-          const stillOnListing = newUrl.includes('adzuna.com') ||
-                                newUrl.includes('indeed.com') ||
+          const stillOnListing = newUrl.includes('indeed.com') ||
                                 newPageText.includes('Filter results') ||
                                 newPageText.includes('Jobs in');
           
@@ -314,10 +559,65 @@ app.post('/automate', async (req, res) => {
     // Wait for dynamic content (reduced timeout)
     await page.waitForTimeout(1000);
     
+    // Check if we were redirected to OAuth/login page (LinkedIn, Google, etc.)
+    const currentUrlBeforeFill = page.url();
+    const isOAuthRedirect = currentUrlBeforeFill.includes('linkedin.com') ||
+                            currentUrlBeforeFill.includes('accounts.google.com') ||
+                            currentUrlBeforeFill.includes('login') ||
+                            currentUrlBeforeFill.includes('oauth') ||
+                            currentUrlBeforeFill.includes('auth');
+    
+    if (isOAuthRedirect && atsSystem === 'lever') {
+      console.log('⚠️ Detected OAuth redirect (likely LinkedIn) - Lever may require authentication');
+      console.log('⚠️ Attempting to navigate back to Lever form...');
+      
+      // Try to go back or wait for redirect back to Lever
+      try {
+        // Wait a bit to see if it redirects back automatically
+        await page.waitForTimeout(5000);
+        
+        const urlAfterWait = page.url();
+        if (urlAfterWait.includes('lever.co') || urlAfterWait.includes('lever')) {
+          console.log('✅ Redirected back to Lever form');
+        } else {
+          // Try going back
+          await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+          await page.waitForTimeout(2000);
+          
+          const urlAfterBack = page.url();
+          if (urlAfterBack.includes('lever.co') || urlAfterBack.includes('lever')) {
+            console.log('✅ Navigated back to Lever form');
+          } else {
+            console.log('⚠️ Still on OAuth page - form may require manual authentication');
+            // Continue anyway - might be able to fill some fields
+          }
+        }
+      } catch (e) {
+        console.log('⚠️ Error handling OAuth redirect:', e.message);
+      }
+    }
+    
     // Fill form fields
     console.log('📝 Filling application form...');
-    const filledFields = await fillApplicationForm(page, applicationData);
+    if (streamSessionId) {
+      sendEvent(streamSessionId, 'filling_form');
+    }
+    
+    const filledFields = await fillApplicationForm(page, applicationData, streamSessionId);
     console.log(`✅ Filled ${filledFields} fields`);
+    
+    // Send frame after form filling if streaming
+    if (streamSessionId) {
+      try {
+        const screenshot = await page.screenshot({ encoding: 'base64' });
+        sendFrame(streamSessionId, screenshot.toString('base64'), { 
+          step: 'form_filled',
+          filledFields 
+        });
+      } catch (e) {
+        console.log('⚠️ Failed to capture form filled screenshot:', e.message);
+      }
+    }
     
     // Upload resume if provided
     let resumeUploaded = false;
@@ -404,6 +704,19 @@ app.post('/automate', async (req, res) => {
               // Wait a bit more for any async updates
               await page.waitForTimeout(2000);
               
+              // Send frame after clicking submit if streaming
+              if (streamSessionId) {
+                try {
+                  const screenshot = await page.screenshot({ encoding: 'base64' });
+                  sendFrame(streamSessionId, screenshot.toString('base64'), { 
+                    step: 'submitted',
+                    action: 'clicked_submit'
+                  });
+                } catch (e) {
+                  // Ignore screenshot errors
+                }
+              }
+              
               // Verify submission by checking for confirmation indicators
               const currentUrl = page.url();
               const pageText = await page.textContent('body').catch(() => '') || '';
@@ -426,12 +739,11 @@ app.post('/automate', async (req, res) => {
               
               // Check if URL changed (often indicates successful submission)
               const urlChanged = currentUrl !== urlBeforeSubmit && 
-                                 !currentUrl.includes('adzuna.com') &&
                                  !currentUrl.includes('indeed.com') &&
                                  !currentUrl.includes('monster.com');
               
               // Check if we're on a job listing page (bad sign - means we didn't get to application form)
-              const isJobListingPage = currentUrl.includes('adzuna.com') ||
+              const isJobListingPage = currentUrl.includes('indeed.com') ||
                                        pageText.includes('Filter results') ||
                                        pageText.includes('Jobs in') ||
                                        pageContent.includes('job-listing') ||
@@ -489,8 +801,7 @@ app.post('/automate', async (req, res) => {
               );
               
               const urlChanged = currentUrl !== urlBeforeSubmit;
-              const isJobListingPage = currentUrl.includes('adzuna.com') || 
-                                      currentUrl.includes('indeed.com');
+              const isJobListingPage = currentUrl.includes('indeed.com');
               
               if (hasConfirmationText || (urlChanged && !isJobListingPage)) {
                 submitted = true;
@@ -514,10 +825,56 @@ app.post('/automate', async (req, res) => {
     // Wait a bit more before taking screenshot to ensure page is stable
     await page.waitForTimeout(1000);
     
+    // Check if we're on an OAuth/login page (shouldn't be after form filling)
+    const finalUrl = page.url();
+    const isOnOAuthPage = finalUrl.includes('linkedin.com') && 
+                         (finalUrl.includes('oauth') || finalUrl.includes('auth') || finalUrl.includes('User Agreement') || finalUrl.includes('user-agreement'));
+    
+    if (isOnOAuthPage && atsSystem === 'lever') {
+      console.log('⚠️ Still on OAuth/login page - Lever form may require manual authentication');
+      console.log('⚠️ Form was filled before redirect, but submission cannot be completed automatically');
+      
+      // Try to navigate back one more time
+      try {
+        await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+        await page.waitForTimeout(2000);
+      } catch (e) {
+        // Ignore errors
+      }
+    }
+    
     // Take screenshot
     const screenshot = await page.screenshot({ encoding: 'base64' });
     
+    // Check if OAuth was required (for Lever with LinkedIn)
+    const requiresOAuth = isOnOAuthPage && atsSystem === 'lever';
+    
+    // Send final frame and completion event if streaming
+    if (streamSessionId) {
+      sendFrame(streamSessionId, screenshot.toString('base64'), { 
+        step: 'completed',
+        submitted,
+        filledFields: filledFields + (resumeUploaded ? 1 : 0)
+      });
+      sendEvent(streamSessionId, 'completed', {
+        success: true,
+        filledFields: filledFields + (resumeUploaded ? 1 : 0),
+        submitted,
+        requiresOAuth
+      });
+      
+      // Close the stream
+      const streamRes = activeStreams.get(streamSessionId);
+      if (streamRes && !streamRes.destroyed) {
+        streamRes.end();
+        activeStreams.delete(streamSessionId);
+      }
+    }
+    
     console.log(`✅ Automation completed - Filled: ${filledFields + (resumeUploaded ? 1 : 0)} fields, Submitted: ${submitted}`);
+    if (requiresOAuth) {
+      console.log('⚠️ OAuth authentication required - form filled but cannot submit automatically');
+    }
     
     res.json({
       success: true,
@@ -526,7 +883,10 @@ app.post('/automate', async (req, res) => {
       screenshot: screenshot.toString('base64'),
       questions: [],
       needsUserInput: false,
-      submitted: submitted
+      submitted: submitted,
+      requiresOAuth: requiresOAuth || undefined,
+      error: requiresOAuth ? 'This application requires LinkedIn authentication. The form was filled, but you need to manually authenticate and submit on the company website.' : undefined,
+      streamSessionId: streamSessionId || undefined
     });
   } catch (error) {
     console.error('❌ Automation failed:', error);
@@ -601,7 +961,14 @@ async function fillFormField(page, selectors, value, options = {}) {
         await page.fill(selector, '');
       }
       
-      await page.fill(selector, value);
+      // Human-like typing (like sorce.jobs) - type character by character with random delays
+      await page.focus(selector);
+      await page.waitForTimeout(100 + Math.random() * 200); // Random delay before typing
+      
+      // Type character by character with realistic delays
+      for (let i = 0; i < value.length; i++) {
+        await page.type(selector, value[i], { delay: 50 + Math.random() * 100 }); // 50-150ms per character
+      }
       
       // Trigger events
       await page.evaluate((sel) => {
@@ -622,8 +989,20 @@ async function fillFormField(page, selectors, value, options = {}) {
 }
 
 // Fill application form
-async function fillApplicationForm(page, data) {
+async function fillApplicationForm(page, data, streamSessionId = null) {
   let filledCount = 0;
+  
+  // Helper to send frame during form filling
+  const sendFrameIfStreaming = async (step) => {
+    if (streamSessionId) {
+      try {
+        const screenshot = await page.screenshot({ encoding: 'base64' });
+        sendFrame(streamSessionId, screenshot.toString('base64'), { step });
+      } catch (e) {
+        // Ignore screenshot errors during streaming
+      }
+    }
+  };
   
   const firstName = data.firstName || data.fullName.split(' ')[0] || '';
   const lastName = data.lastName || data.fullName.split(' ').slice(1).join(' ') || '';
@@ -679,6 +1058,7 @@ async function fillApplicationForm(page, data) {
     '#email'
   ], data.email)) {
     filledCount++;
+    await sendFrameIfStreaming('filled_email');
   }
   
   // Phone

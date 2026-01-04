@@ -21,6 +21,7 @@ struct FeedView: View {
     @State private var appliedJobIds: Set<String> = [] // Track applied job IDs
     @State private var passedJobIds: Set<String> = [] // Track passed/rejected job IDs
     @State private var currentJobIndex: Int = 0 // Track current job in swipeable view
+    @State private var hasLoadedInitialData: Bool = false // Track if initial data has been loaded
     
     // Computed property for filtered jobs (excludes applied and passed jobs)
     private var filteredJobPosts: [JobPost] {
@@ -149,20 +150,39 @@ struct FeedView: View {
             }
             .onAppear {
                 loadCareerInterests()
-                Task {
-                    await fetchData()
+                // Only fetch data on first appearance, not every time tab is switched
+                if !hasLoadedInitialData {
+                    Task {
+                        await loadPassedJobs()
+                        await fetchAppliedJobs()
+                        await fetchData()
+                        hasLoadedInitialData = true
+                    }
+                } else {
+                    // Just refresh applied/passed jobs when returning to tab
+                    Task {
+                        await loadPassedJobs()
+                        await fetchAppliedJobs()
+                    }
                 }
             }
             .refreshable {
+                // Pull to refresh - always fetch new data
                 loadCareerInterests()
                 await fetchData()
             }
-            .sheet(isPresented: Binding(
-                get: { showingSimpleApply != nil },
-                set: { if !$0 { showingSimpleApply = nil } }
-            )) {
-                if let job = showingSimpleApply, let appData = applicationData {
-                    SimpleApplyReviewView(job: job, applicationData: appData)
+            .fullScreenCover(item: Binding(
+                get: { showingSimpleApply },
+                set: { showingSimpleApply = $0 }
+            )) { job in
+                if let appData = applicationData {
+                    // Use Human-Assisted Apply for jobs with URLs (visible, slow, user-controlled)
+                    if let jobURL = job.url, !jobURL.isEmpty {
+                        HumanAssistedApplyView(job: job, applicationData: appData)
+                    } else {
+                        // No URL, use review screen
+                        SimpleApplyReviewView(job: job, applicationData: appData)
+                    }
                 }
             }
             .fullScreenCover(item: Binding(
@@ -171,13 +191,6 @@ struct FeedView: View {
             )) { job in
                 // Use Playwright-based fully automated application (like sorce.jobs)
                 AutoApplyProgressView(job: job)
-            }
-            .onAppear {
-                Task {
-                    await loadPassedJobs()
-                    await fetchAppliedJobs()
-                    await fetchData()
-                }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ApplicationStatusUpdated"))) { _ in
                 // Refresh applied jobs when application status changes
@@ -205,10 +218,16 @@ struct FeedView: View {
     
     // MARK: - Handle Apply
     private func handleApply(to post: JobPost) {
-        // Check if job has URL for auto-apply
+        // Use Human-Assisted Apply (slow, visible, user-controlled)
+        // This follows human behavior patterns and stops at friction
         if let jobURL = post.url, !jobURL.isEmpty {
-            // Fully automated application using Playwright (like sorce.jobs)
-            showingAutoApply = post
+            // Get application data
+            let profileData = SimpleApplyService.shared.getUserProfileData()
+            let appData = SimpleApplyService.shared.generateApplicationData(for: post, profileData: profileData)
+            applicationData = appData
+            
+            // Show human-assisted apply view (visible, slow, user-controlled)
+            showingSimpleApply = post
         } else {
             // No URL, show review screen instead
             let profileData = SimpleApplyService.shared.getUserProfileData()

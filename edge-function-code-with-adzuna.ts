@@ -75,19 +75,17 @@ serve(async (req) => {
     
     console.log(`🌐 Starting job search from multiple sources...`)
     console.log(`   - Search queries: ${JSON.stringify(queriesToSearch)}`)
-    console.log(`   - Searching ${queriesToSearch.length} queries using Adzuna, The Muse, and Workday`)
+    console.log(`   - Searching ${queriesToSearch.length} queries using The Muse, Workday, and JobSpy`)
     
-    // Use Adzuna, The Muse, Workday, and JobSpy for job searching
+    // Use The Muse, Workday, and JobSpy for job searching
     // All sources will be searched for each query
     const sources = [
-      { name: 'Adzuna', fn: fetchFromAdzunaAPI },
       { name: 'The Muse', fn: scrapeTheMuse },
       { name: 'Workday', fn: scrapeWorkday },
       { name: 'JobSpy', fn: fetchFromJobSpy }
     ]
     
     console.log(`🔍 Searching ${sources.length} sources: ${sources.map(s => s.name).join(', ')}`)
-    console.log(`   ✅ Adzuna: Keyword-based API search across all companies`)
     console.log(`   ✅ The Muse: Category and keyword-based API search`)
     console.log(`   ✅ Workday: ATS scraping from major companies`)
     console.log(`   ✅ JobSpy: Multi-site scraper (LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google)`)
@@ -102,7 +100,7 @@ serve(async (req) => {
       console.log(`\n🔎 Searching for: "${query}"`)
       
       // Run sources sequentially to avoid resource limits
-      // Always search all three sources: Adzuna, The Muse, and Workday
+      // Always search all sources: The Muse, Workday, and JobSpy
       for (const source of sources) {
         // Only early return if we have way too many jobs (allows all sources to contribute)
         if (allJobs.length >= EARLY_RETURN_THRESHOLD) {
@@ -185,7 +183,7 @@ serve(async (req) => {
     console.log(`   - Total jobs found: ${allJobs.length}`)
       console.log('📊 Jobs by source:')
       // Show all three sources, even if they returned 0 jobs
-      const allSourceNames = ['Adzuna', 'The Muse', 'Workday']
+      const allSourceNames = ['The Muse', 'Workday', 'JobSpy']
       for (const sourceName of allSourceNames) {
         const count = sourceStats[sourceName] || 0
         console.log(`   - ${sourceName}: ${count} jobs`)
@@ -329,58 +327,6 @@ serve(async (req) => {
     )
   }
 })
-
-// Adzuna API - PRIMARY SOURCE (searches all jobs by keywords, like sorce.jobs)
-async function fetchFromAdzunaAPI(keywords: string, location: string): Promise<any[]> {
-  // Get API keys from environment variables
-  const APP_ID = Deno.env.get('ADZUNA_APP_ID') || 'ff850947' // Fallback for testing
-  const APP_KEY = Deno.env.get('ADZUNA_APP_KEY') || '114516221e332fe7ddb772224a68e0bb' // Fallback for testing
-  
-  if (!APP_ID || !APP_KEY) {
-    console.log('⚠️ Adzuna API keys not configured')
-    return []
-  }
-
-  try {
-    // Adzuna API searches across ALL companies by keywords (not specific companies)
-    const country = 'us' // Change to your country code if needed
-    const locationParam = location || 'United States'
-    const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/1?app_id=${APP_ID}&app_key=${APP_KEY}&results_per_page=50&what=${encodeURIComponent(keywords)}&where=${encodeURIComponent(locationParam)}`
-    
-    console.log(`   📡 Adzuna API: Searching for "${keywords}" in "${locationParam}"`)
-    const response = await fetch(url)
-    
-    if (!response.ok) {
-      console.error(`   ❌ Adzuna API error: ${response.status} ${response.statusText}`)
-      return []
-    }
-
-    const data = await response.json()
-    
-    if (!data.results || !Array.isArray(data.results)) {
-      console.log(`   ℹ️ Adzuna API: No results found`)
-      return []
-    }
-    
-    const jobs = data.results.map((job: any) => ({
-      id: `adzuna_${job.id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      title: job.title || 'Job Title',
-      company: job.company?.display_name || job.company?.name || 'Company not specified',
-      location: job.location?.display_name || locationParam || 'Location not specified',
-      posted_date: job.created ? new Date(job.created).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      description: job.description ? cleanJobText(job.description) : null,
-      url: job.redirect_url || job.url || null,
-      salary: formatSalary(job.salary_min, job.salary_max) || "Salary not specified",
-      job_type: job.contract_type || job.job_type || null,
-    }))
-    
-    console.log(`   ✅ Adzuna API: Found ${jobs.length} jobs`)
-    return jobs
-  } catch (error) {
-    console.error('❌ Adzuna API error:', error)
-    return []
-  }
-}
 
 // The Muse API - Scrapes jobs from The Muse job board
 async function scrapeTheMuse(keywords: string, location: string): Promise<any[]> {
@@ -2059,7 +2005,7 @@ async function scrapeZipRecruiter(keywords: string, location: string): Promise<a
   return jobs
 }
 
-// Format salary from Adzuna API - simplified to "k" notation
+// Format salary range - simplified to "k" notation (used for various sources)
 function formatSalary(min: number | null, max: number | null): string | null {
   if (!min && !max) return null
   

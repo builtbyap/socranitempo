@@ -24,6 +24,7 @@ struct AutoApplyProgressView: View {
     @State private var submitted: Bool = false
     @State private var screenshot: String? = nil
     @State private var showingScreenshot = false
+    @ObservedObject private var streamService = SSEStreamService.shared
     
     enum AutoApplyStep {
         case starting
@@ -157,8 +158,78 @@ struct AutoApplyProgressView: View {
                         }
                     }
                     .padding()
+                } else if currentStep == .processing {
+                    // Live Stream View (like sorce.jobs)
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            // Live stream display
+                            if let liveFrame = streamService.currentFrame {
+                                VStack(spacing: 12) {
+                                    Text("Live Application Process")
+                                        .font(.system(size: 20, weight: .semibold))
+                                    
+                                    Image(uiImage: liveFrame)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(maxWidth: .infinity, maxHeight: 500)
+                                        .cornerRadius(12)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color.blue, lineWidth: 2)
+                                        )
+                                    
+                                    if let step = streamService.currentStep {
+                                        Text(step)
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
+                                    // Connection status
+                                    HStack {
+                                        Circle()
+                                            .fill(streamService.isConnected ? Color.green : Color.red)
+                                            .frame(width: 8, height: 8)
+                                        Text(streamService.isConnected ? "Live" : "Connecting...")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                .padding()
+                            } else {
+                                // Loading state - show progress even if stream fails
+                                VStack(spacing: 16) {
+                                    ProgressView()
+                                        .scaleEffect(1.5)
+                                    
+                                    Text(streamService.currentStep ?? progressMessage)
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.secondary)
+                                    
+                                    if let error = streamService.error {
+                                        VStack(spacing: 8) {
+                                            Text("Stream unavailable")
+                                                .font(.system(size: 14))
+                                                .foregroundColor(.orange)
+                                            Text("Application is still processing...")
+                                                .font(.system(size: 12))
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                }
+                                .padding()
+                            }
+                            
+                            // Progress message
+                            Text(progressMessage)
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
+                        .padding()
+                    }
                 } else {
-                    // Progress View
+                    // Starting/Other states
                     VStack(spacing: 24) {
                         ProgressView()
                             .scaleEffect(1.5)
