@@ -4,7 +4,10 @@
 const express = require('express');
 const { chromium } = require('playwright');
 const cors = require('cors');
+const multer = require('multer');
+const fs = require('fs');
 const app = express();
+const upload = multer({ dest: '/tmp' });
 
 // Helper function to get proxy configuration (like sorce.jobs)
 function getProxyConfig() {
@@ -42,6 +45,857 @@ const activeStreams = new Map();
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'playwright-automation' });
+});
+
+function getGeminiApiKey() {
+  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+}
+
+function getOpenAIApiKey() {
+  return process.env.OPENAI_API_KEY || '';
+}
+
+async function transcribeAudioWithOpenAI(filePath, mimeType, originalName) {
+  const apiKey = getOpenAIApiKey();
+  if (!apiKey) {
+    throw new Error('Missing OPENAI_API_KEY on server');
+  }
+
+  const fileData = fs.readFileSync(filePath);
+  const audioBlob = new Blob([fileData], { type: mimeType || 'audio/mp4' });
+  const form = new FormData();
+  form.append('file', audioBlob, originalName || 'audio.m4a');
+  form.append('model', process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe');
+  form.append('response_format', 'text');
+
+  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: form
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OpenAI transcription failed (${response.status}): ${text}`);
+  }
+
+  const transcript = (await response.text()).trim();
+  if (!transcript) {
+    throw new Error('OpenAI returned empty transcript');
+  }
+  return transcript;
+}
+
+async function generateNotesWithOpenAI(prompt, options = {}) {
+  const apiKey = getOpenAIApiKey();
+  if (!apiKey) {
+    throw new Error('Missing OPENAI_API_KEY on server');
+  }
+
+  const model = options.model || process.env.OPENAI_NOTES_MODEL || 'gpt-4o-mini';
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      max_tokens: 8192
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`OpenAI request failed (${response.status}): ${text}`);
+  }
+
+  const json = await response.json();
+  let text = json?.choices?.[0]?.message?.content?.trim();
+  if (!text) {
+    throw new Error('OpenAI returned empty response');
+  }
+  text = decodeHtmlEntities(text);
+  return text;
+}
+
+async function generateNotesWithGemini(parts, options = {}) {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Missing GEMINI_API_KEY on server');
+  }
+
+  const model = options.model || process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const body = {
+    contents: [{ role: 'user', parts }],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 8192
+    }
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Gemini request failed (${response.status}): ${text}`);
+  }
+
+  const json = await response.json();
+  let text = json?.candidates?.[0]?.content?.parts
+    ?.map(p => p.text || '')
+    .join('\n')
+    .trim();
+  if (!text) {
+    throw new Error('Gemini returned empty response');
+  }
+  // Decode any HTML entities Gemini may include
+  text = text
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+  return text;
+}
+
+function decodeHtmlEntities(text) {
+  return text
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+async function formatNotesForApp(rawNotes, contextLabel = 'study notes', options = {}) {
+  const { forceSecondPass = false } = options;
+  const cleaned = decodeHtmlEntities((rawNotes || '').trim());
+  if (!cleaned) return rawNotes;
+
+  // Keep only if content already matches the app's target Turbo format.
+  const hasBriefOverview = cleaned.includes('\n## Brief Overview') || cleaned.startsWith('## Brief Overview');
+  const hasKeyPoints = cleaned.includes('\n## Key Points') || cleaned.startsWith('## Key Points');
+  const hasTopicHeadings = cleaned.includes('\n## ');
+  const hasBullets = cleaned.includes('\n- ');
+  const hasBlockquotes = cleaned.includes('\n> ');
+  if (!forceSecondPass && hasBriefOverview && hasKeyPoints && hasTopicHeadings && hasBullets && hasBlockquotes) {
+    return cleaned;
+  }
+
+  // Second-pass: reformat into Turbo AI–style study sheet.
+  try {
+    const reformatPrompt = [
+      `Reformat the following ${contextLabel} into a polished study sheet.`,
+      'CRITICAL: Keep ALL information. Do not remove or summarize away any facts.',
+      '',
+      'Required markdown format (follow exactly):',
+      '1. Start with "## Brief Overview" — a short paragraph summarizing the content.',
+      '2. Then "## Key Points" — bullet list (- ) of main ideas.',
+      '3. Then additional topic sections using "## " headings with a relevant emoji prefix (e.g. "## ⚡ Kirchhoff\'s Laws").',
+      '4. Under each section use "### " subheadings for subtopics.',
+      '5. Use blockquotes (> ) for definitions and key concepts.',
+      '6. Use "Tip:", "Key Insight:", "Definition:", "Warning:" prefixes on lines where applicable.',
+      '7. Use numbered lists (1. 2. 3.) for sequential steps or procedures.',
+      '8. Use bullet lists (- ) for non-sequential facts.',
+      '9. Use --- horizontal rules between major sections.',
+      '10. Keep equations in readable plain text/Unicode. For superscripts use ^ with parentheses for groups: x^2, x^(a+b), x^(n-1). For subscripts use _ with parentheses: a_n, x_(i+1). Never use LaTeX or curly braces {}.',
+      '11. No code fences. No prose paragraphs longer than 3 sentences.',
+      '12. When the source has tables, diagrams, or comparison data, reproduce them as markdown tables (| Header | Header |).',
+      '',
+      'Input text to reformat:',
+      cleaned
+    ].join('\n');
+    const formatted = await generateNotesWithOpenAI(reformatPrompt);
+    return decodeHtmlEntities(formatted?.trim() || cleaned);
+  } catch (e) {
+    return cleaned;
+  }
+}
+
+function cleanupUploadedFile(filePath) {
+  if (!filePath) return;
+  fs.unlink(filePath, () => {});
+}
+
+function normalizeOutputMode(v) {
+  const s = String(v || 'notes').toLowerCase().trim();
+  if (s === 'flashcards' || s === 'flashcard') return 'flashcards';
+  if (s === 'quiz') return 'quiz';
+  return 'notes';
+}
+
+function extractJsonObjectLoose(text) {
+  let t = (text || '').trim();
+  if (t.startsWith('```')) {
+    t = t.replace(/^```(?:json)?\s*/i, '').trim();
+    const fenceEnd = t.indexOf('```');
+    if (fenceEnd !== -1) t = t.slice(0, fenceEnd).trim();
+  }
+  const start = t.indexOf('{');
+  const end = t.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error('No JSON object in model response');
+  }
+  return JSON.parse(t.slice(start, end + 1));
+}
+
+async function generateFlashcardsPayloadFromText(sourceLabel, content) {
+  const prompt = [
+    'You create study flashcards from source material.',
+    'Return ONLY valid JSON (no markdown code fences) with this exact shape:',
+    '{"title":"short deck title","topic":"short topic label","cards":[{"front":"question or term","back":"answer or definition"}]}',
+    'Rules:',
+    '- Use 10-28 cards depending on how much material there is; each front/back under 500 characters.',
+    '- Front = prompt to recall; back = clear concise answer.',
+    '- Cover the most important facts.',
+    '',
+    `Source (${sourceLabel}):`,
+    (content || '').slice(0, 120000)
+  ].join('\n');
+  const raw = await generateNotesWithOpenAI(prompt, { model: process.env.OPENAI_FLASHCARDS_MODEL || 'gpt-4o-mini' });
+  const obj = extractJsonObjectLoose(raw);
+  const cards = Array.isArray(obj.cards) ? obj.cards : [];
+  const normalized = cards
+    .map((c) => ({ front: String(c.front || '').trim(), back: String(c.back || '').trim() }))
+    .filter((c) => c.front && c.back);
+  return {
+    title: String(obj.title || '').trim() || 'Flashcards',
+    topic: String(obj.topic || '').trim() || 'General',
+    cards: normalized
+  };
+}
+
+async function generateQuizPayloadFromText(sourceLabel, content) {
+  const prompt = [
+    'Create a multiple-choice quiz from the source material.',
+    'Return ONLY valid JSON (no markdown fences):',
+    '{"title":"...","topic":"...","questions":[{"question":"...","options":["A","B","C","D"],"correctIndex":0}]}',
+    'Rules:',
+    '- 8-18 questions; each with exactly 4 options.',
+    '- correctIndex is 0-3.',
+    '- Questions test understanding.',
+    '',
+    `Source (${sourceLabel}):`,
+    (content || '').slice(0, 120000)
+  ].join('\n');
+  const raw = await generateNotesWithOpenAI(prompt, { model: process.env.OPENAI_QUIZ_MODEL || 'gpt-4o-mini' });
+  const obj = extractJsonObjectLoose(raw);
+  const questions = Array.isArray(obj.questions) ? obj.questions : [];
+  const normalized = questions
+    .map((q) => {
+      const opts = Array.isArray(q.options) ? q.options.map((o) => String(o).trim()).filter(Boolean) : [];
+      let idx = Number(q.correctIndex);
+      if (Number.isNaN(idx)) idx = 0;
+      idx = Math.max(0, Math.min(3, Math.round(idx)));
+      return {
+        question: String(q.question || '').trim(),
+        options: opts.length >= 4 ? opts.slice(0, 4) : opts,
+        correctIndex: idx
+      };
+    })
+    .filter((q) => q.question && q.options.length === 4);
+  return {
+    title: String(obj.title || '').trim() || 'Quiz',
+    topic: String(obj.topic || '').trim() || 'General',
+    questions: normalized
+  };
+}
+
+// YouTube helpers
+
+function extractYouTubeVideoId(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    const host = u.hostname.replace('www.', '');
+    if (host === 'youtu.be') return u.pathname.slice(1).split('/')[0];
+    if (host.includes('youtube.com') || host.includes('youtube-nocookie.com')) {
+      if (u.searchParams.has('v')) return u.searchParams.get('v');
+      if (u.pathname.startsWith('/embed/')) return u.pathname.split('/')[2];
+      if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/')[2];
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function fetchYouTubeMetadata(videoId) {
+  let title = '';
+  let author = '';
+
+  try {
+    const oembedResp = await fetch(
+      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+    );
+    if (oembedResp.ok) {
+      const data = await oembedResp.json();
+      title = data.title || '';
+      author = data.author_name || '';
+    }
+  } catch (_) {}
+
+  return { title, author };
+}
+
+function isYouTubeURL(urlStr) {
+  try {
+    const host = new URL(urlStr).hostname.replace('www.', '');
+    return host.includes('youtube.com') || host === 'youtu.be' || host.includes('youtube-nocookie.com');
+  } catch (_) {
+    return false;
+  }
+}
+
+// Turbo AI prompt template for structured notes
+const TURBO_NOTES_PROMPT_RULES = [
+  'STRICT formatting rules (follow exactly):',
+  '1. Start with "## Brief Overview" — a short paragraph summarizing the content.',
+  '2. Then "## Key Points" — a bullet list (- ) of the main ideas.',
+  '3. Then additional topic sections using "## " headings with a relevant emoji prefix (e.g. "## ⚡ Topic Name").',
+  '4. Under each section use "### " subheadings for subtopics.',
+  '5. Use blockquotes (> ) for definitions and key concepts (one blockquote per definition).',
+  '6. Prefix important callout lines with "Tip:", "Key Insight:", "Definition:", or "Warning:" as appropriate.',
+  '7. Use numbered lists (1. 2. 3.) for sequential steps or procedures.',
+  '8. Use bullet lists (- ) for non-sequential facts.',
+  '9. Put --- horizontal rules between major sections.',
+  '10. Keep equations in readable plain text/Unicode. For superscripts use ^ with parentheses for groups: x^2, x^(a+b), x^(n-1). For subscripts use _ with parentheses: a_n, x_(i+1). Never use LaTeX or curly braces {}.',
+  '11. No code fences. No prose paragraphs longer than 3 sentences.',
+  '12. When the source has tables, diagrams, or comparison data, reproduce them as markdown tables (| Header | Header |).'
+].join('\n');
+
+// Generate notes from website or YouTube URL
+app.post('/generate-notes-from-url', async (req, res) => {
+  try {
+    const { url, outputMode: rawMode } = req.body || {};
+    const outputMode = normalizeOutputMode(rawMode);
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: 'Missing required field: url' });
+    }
+
+    let isYT = isYouTubeURL(url);
+
+    // ─── YouTube path: use Gemini's knowledge of the video ───
+    if (isYT) {
+      const videoId = extractYouTubeVideoId(url);
+      const meta = videoId ? await fetchYouTubeMetadata(videoId) : { title: '', author: '' };
+      const videoTitle = meta.title || '';
+      const videoAuthor = meta.author || '';
+
+      console.log(`📹 YouTube video: "${videoTitle}" by ${videoAuthor} (${videoId})`);
+
+      const ytPrompt = [
+        'You are an expert study-note generator.',
+        'You are given a YouTube video. Generate COMPREHENSIVE, DETAILED study notes covering EVERYTHING discussed in the video.',
+        'Include all key topics, concepts, examples, demonstrations, steps, and conclusions.',
+        'Be thorough — imagine a student needs these notes to learn the full material without watching the video.',
+        '',
+        TURBO_NOTES_PROMPT_RULES,
+        '',
+        `YouTube URL: ${url}`,
+        videoTitle ? `Video title: "${videoTitle}"` : '',
+        videoAuthor ? `Channel / Author: ${videoAuthor}` : ''
+      ].join('\n');
+
+      const rawNotes = await generateNotesWithOpenAI(ytPrompt);
+
+      if (outputMode === 'flashcards') {
+        const payload = await generateFlashcardsPayloadFromText('YouTube video', rawNotes);
+        if (!payload.cards.length) {
+          return res.status(422).json({ error: 'Could not generate flashcards from this video.' });
+        }
+        return res.json({
+          title: payload.title || videoTitle || 'Flashcards',
+          topic: payload.topic,
+          cards: payload.cards
+        });
+      }
+
+      if (outputMode === 'quiz') {
+        const payload = await generateQuizPayloadFromText('YouTube video', rawNotes);
+        if (!payload.questions.length) {
+          return res.status(422).json({ error: 'Could not generate a quiz from this video.' });
+        }
+        return res.json({
+          title: payload.title || videoTitle || 'Quiz',
+          topic: payload.topic,
+          questions: payload.questions
+        });
+      }
+
+      const notes = await formatNotesForApp(rawNotes, 'YouTube video notes');
+
+      return res.json({
+        title: videoTitle || 'YouTube notes',
+        notes
+      });
+    }
+
+    // ─── Website path: fetch page HTML and extract text ───
+    let pageText = '';
+    let pageTitle = '';
+
+    // Step 1: Try simple fetch (fast, works for most sites)
+    try {
+      const webpageResponse = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9'
+        }
+      });
+      const html = await webpageResponse.text();
+
+      const titleMatch = html.match(/<title>([^<]*)<\/title>/i);
+      if (titleMatch) pageTitle = titleMatch[1].trim();
+
+      const isChallengePage =
+        html.includes('Just a moment') ||
+        html.includes('cf-browser-verification') ||
+        html.includes('challenge-platform') ||
+        html.includes('cf-chl-bypass') ||
+        (html.includes('Enable JavaScript') && html.length < 15000);
+
+      if (!isChallengePage) {
+        pageText = html
+          .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+          .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 120000);
+      } else {
+        console.log('⚠️ Simple fetch hit a challenge page, will use Playwright');
+      }
+    } catch (e) {
+      console.log('⚠️ Simple fetch failed:', e.message);
+    }
+
+    // Step 2: If simple fetch got no usable content, try Firecrawl (handles JS + Cloudflare, returns markdown)
+    if (!pageText || pageText.length < 200) {
+      console.log('🌐 Trying Firecrawl to fetch page content...');
+      const firecrawlKey = process.env.FIRECRAWL_API_KEY || 'fc-9ca327ba8a5547b7af27fbd77059b7bf';
+      try {
+        const fcResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${firecrawlKey}`
+          },
+          body: JSON.stringify({ url, formats: ['markdown'] }),
+          signal: AbortSignal.timeout(30000)
+        });
+        if (fcResponse.ok) {
+          const fcData = await fcResponse.json();
+          const md = fcData?.data?.markdown || '';
+          if (md.trim().length > 200) {
+            pageText = md.trim().slice(0, 120000);
+            if (!pageTitle && fcData?.data?.metadata?.title) {
+              pageTitle = fcData.data.metadata.title;
+            }
+            console.log(`✅ Firecrawl fetched ${pageText.length} chars from page`);
+          }
+        } else {
+          const errText = await fcResponse.text().catch(() => '');
+          console.log(`⚠️ Firecrawl returned ${fcResponse.status}: ${errText.slice(0, 200)}`);
+        }
+      } catch (e) {
+        console.log('⚠️ Firecrawl failed:', e.message);
+      }
+    }
+
+    // Step 3: Last resort — use Playwright headless browser (heavy but handles toughest cases)
+    if (!pageText || pageText.length < 200) {
+      console.log('🌐 Falling back to Playwright to fetch page content...');
+      let browser = null;
+      try {
+        browser = await chromium.launch({
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+        });
+        const context = await browser.newContext({
+          userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          viewport: { width: 1280, height: 900 }
+        });
+        const page = await context.newPage();
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 25000 });
+        await page.waitForTimeout(4000);
+
+        pageTitle = await page.title().catch(() => '') || pageTitle;
+        pageText = await page.evaluate(() => document.body.innerText).catch(() => '');
+        pageText = (pageText || '').trim().slice(0, 120000);
+
+        await browser.close();
+        browser = null;
+        console.log(`✅ Playwright fetched ${pageText.length} chars from page`);
+      } catch (e) {
+        console.log('⚠️ Playwright fetch also failed:', e.message);
+        if (browser) {
+          try { await browser.close(); } catch (_) {}
+        }
+      }
+    }
+
+    if (outputMode === 'flashcards') {
+      if (!pageText || pageText.length < 50) {
+        return res.status(422).json({ error: 'Could not read enough text from this page to make flashcards.' });
+      }
+      const payload = await generateFlashcardsPayloadFromText('webpage', pageText);
+      if (!payload.cards.length) {
+        return res.status(422).json({ error: 'Could not generate flashcards from this page.' });
+      }
+      return res.json({
+        title: payload.title || pageTitle || 'Flashcards',
+        topic: payload.topic,
+        cards: payload.cards
+      });
+    }
+
+    if (outputMode === 'quiz') {
+      if (!pageText || pageText.length < 50) {
+        return res.status(422).json({ error: 'Could not read enough text from this page to make a quiz.' });
+      }
+      const payload = await generateQuizPayloadFromText('webpage', pageText);
+      if (!payload.questions.length) {
+        return res.status(422).json({ error: 'Could not generate a quiz from this page.' });
+      }
+      return res.json({
+        title: payload.title || pageTitle || 'Quiz',
+        topic: payload.topic,
+        questions: payload.questions
+      });
+    }
+
+    const prompt = [
+      'You are an expert study-note generator.',
+      'Analyze the following webpage content and generate COMPREHENSIVE study notes that TEACH the underlying concepts.',
+      '',
+      'IMPORTANT — If the page contains quizzes, tests, practice problems, or exercises:',
+      '- Do NOT just list the questions and selected answers.',
+      '- Identify the TOPICS and CONCEPTS being tested.',
+      '- Create study notes that EXPLAIN those concepts with clear definitions and reasoning.',
+      '- Include worked examples showing HOW to solve each type of problem step by step.',
+      '- Show the correct answer AND explain WHY it is correct and why the other options are wrong.',
+      '',
+      'If the page contains articles, lectures, or reference material:',
+      '- Extract all key information and organize it into clear study notes.',
+      '- Do not omit details or summarize away facts.',
+      '',
+      TURBO_NOTES_PROMPT_RULES,
+      '',
+      `Source URL: ${url}`,
+      pageText ? `Source text:\n${pageText}` : ''
+    ].join('\n');
+
+    const rawNotes = await generateNotesWithOpenAI(prompt);
+    const notes = await formatNotesForApp(rawNotes, 'web source notes');
+
+    return res.json({
+      title: pageTitle || 'Web notes',
+      notes
+    });
+  } catch (error) {
+    console.error('❌ generate-notes-from-url failed:', error);
+    return res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// Generate notes from uploaded document
+app.post('/generate-notes-from-document', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Missing required multipart file field: file' });
+    }
+
+    const fileData = fs.readFileSync(req.file.path);
+    const base64Data = fileData.toString('base64');
+    const mimeType = req.file.mimetype || 'application/octet-stream';
+    const originalName = req.file.originalname || 'Document';
+    const outputMode = normalizeOutputMode(req.body?.outputMode);
+    const baseTitle = originalName.replace(/\.[^.]+$/, '');
+
+    const inlinePart = {
+      inline_data: {
+        mime_type: mimeType,
+        data: base64Data
+      }
+    };
+
+    if (outputMode === 'flashcards') {
+      const raw = await generateNotesWithGemini([
+        {
+          text: [
+            'Read this entire document.',
+            'Output ONLY valid JSON (no markdown, no code fences) with this exact shape:',
+            '{"title":"short title","topic":"short label","cards":[{"front":"term or question","back":"definition or answer"}]}',
+            'Create 15-30 high-quality flashcards from the material.',
+            'If the file is unreadable, return {"title":"Unreadable","topic":"General","cards":[]}.'
+          ].join('\n')
+        },
+        inlinePart
+      ]);
+      let obj;
+      try {
+        obj = extractJsonObjectLoose(raw);
+      } catch (e) {
+        cleanupUploadedFile(req.file.path);
+        return res.status(422).json({ error: 'Could not parse flashcards from document.' });
+      }
+      const cards = Array.isArray(obj.cards) ? obj.cards : [];
+      const normalized = cards
+        .map((c) => ({ front: String(c.front || '').trim(), back: String(c.back || '').trim() }))
+        .filter((c) => c.front && c.back);
+      cleanupUploadedFile(req.file.path);
+      if (!normalized.length) {
+        return res.status(422).json({ error: 'Could not generate flashcards from this document.' });
+      }
+      return res.json({
+        title: String(obj.title || '').trim() || baseTitle,
+        topic: String(obj.topic || '').trim() || 'General',
+        cards: normalized
+      });
+    }
+
+    if (outputMode === 'quiz') {
+      const raw = await generateNotesWithGemini([
+        {
+          text: [
+            'Read this entire document.',
+            'Output ONLY valid JSON (no markdown, no code fences) with this exact shape:',
+            '{"title":"short title","topic":"short label","questions":[{"question":"...","options":["A","B","C","D"],"correctIndex":0}]}',
+            'Create 10-20 multiple-choice questions with exactly 4 options each. correctIndex is 0-3.',
+            'If the file is unreadable, return {"title":"Unreadable","topic":"General","questions":[]}.'
+          ].join('\n')
+        },
+        inlinePart
+      ]);
+      let obj;
+      try {
+        obj = extractJsonObjectLoose(raw);
+      } catch (e) {
+        cleanupUploadedFile(req.file.path);
+        return res.status(422).json({ error: 'Could not parse quiz from document.' });
+      }
+      const questions = Array.isArray(obj.questions) ? obj.questions : [];
+      const normalized = questions
+        .map((q) => {
+          const opts = Array.isArray(q.options) ? q.options.map((o) => String(o).trim()).filter(Boolean) : [];
+          let idx = Number(q.correctIndex);
+          if (Number.isNaN(idx)) idx = 0;
+          idx = Math.max(0, Math.min(3, Math.round(idx)));
+          return {
+            question: String(q.question || '').trim(),
+            options: opts.length >= 4 ? opts.slice(0, 4) : opts,
+            correctIndex: idx
+          };
+        })
+        .filter((q) => q.question && q.options.length === 4);
+      cleanupUploadedFile(req.file.path);
+      if (!normalized.length) {
+        return res.status(422).json({ error: 'Could not generate a quiz from this document.' });
+      }
+      return res.json({
+        title: String(obj.title || '').trim() || baseTitle,
+        topic: String(obj.topic || '').trim() || 'General',
+        questions: normalized
+      });
+    }
+
+    const rawNotes = await generateNotesWithGemini([
+      {
+        text: [
+          'Extract ALL information from this uploaded document and output a polished markdown study sheet.',
+          'Do not omit any facts, definitions, numbers, dates, or steps.',
+          '',
+          'STRICT formatting rules (follow exactly):',
+          '1. Start with "## Brief Overview" — a short paragraph summarizing the document.',
+          '2. Then "## Key Points" — a bullet list (- ) of the main ideas.',
+          '3. Then additional topic sections using "## " headings with a relevant emoji prefix (e.g. "## 🔌 Topic Name").',
+          '4. Under each section use "### " subheadings for subtopics.',
+          '5. Use blockquotes (> ) for definitions and key concepts.',
+          '6. Prefix important callout lines with "Tip:", "Key Insight:", "Definition:", or "Warning:".',
+          '7. Use numbered lists (1. 2. 3.) for sequential steps or procedures.',
+          '8. Use bullet lists (- ) for non-sequential facts.',
+          '9. Put --- horizontal rules between major sections.',
+          '10. Keep equations in readable plain text/Unicode. For superscripts use ^ with parentheses for groups: x^2, x^(a+b), x^(n-1). For subscripts use _ with parentheses: a_n, x_(i+1). Never use LaTeX or curly braces {}.',
+          '11. No code fences. No long prose paragraphs.',
+          '12. When the source has tables, diagrams, or comparison data, reproduce them as markdown tables (| Header | Header |).'
+        ].join('\n')
+      },
+      inlinePart
+    ]);
+    const notes = await formatNotesForApp(rawNotes, 'document notes');
+
+    cleanupUploadedFile(req.file.path);
+
+    return res.json({
+      title: baseTitle,
+      notes
+    });
+  } catch (error) {
+    console.error('❌ generate-notes-from-document failed:', error);
+    cleanupUploadedFile(req.file?.path);
+    return res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// Solve homework problems from uploaded/captured image
+app.post('/solve-homework-from-image', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Missing required multipart file field: file' });
+    }
+
+    const fileData = fs.readFileSync(req.file.path);
+    const base64Data = fileData.toString('base64');
+    const mimeType = req.file.mimetype || 'image/jpeg';
+
+    const solution = await generateNotesWithGemini([
+      {
+        text: [
+          'You are an expert homework problem solver.',
+          'Analyze this image and solve every visible problem.',
+          'If multiple problems are shown, solve each one in order.',
+          '',
+          'Output markdown with this exact structure:',
+          '## Final Answer',
+          '- Provide the direct final answer(s) first.',
+          '',
+          '## Step-by-Step Explanation',
+          '1. Show each step clearly and in order.',
+          '2. Explain formulas and substitutions briefly.',
+          '3. Include units where relevant.',
+          '',
+          '## Quick Check',
+          '- Briefly verify the answer is reasonable.',
+          '',
+          'Rules:',
+          '- Do not omit visible information.',
+          '- Keep equations in readable plain text/Unicode (no LaTeX).',
+          '- If text is unclear, state assumptions before solving.'
+        ].join('\n')
+      },
+      {
+        inline_data: {
+          mime_type: mimeType,
+          data: base64Data
+        }
+      }
+    ]);
+
+    cleanupUploadedFile(req.file.path);
+
+    return res.json({
+      title: 'Homework solution',
+      notes: solution
+    });
+  } catch (error) {
+    console.error('❌ solve-homework-from-image failed:', error);
+    cleanupUploadedFile(req.file?.path);
+    return res.status(500).json({ error: error.message || String(error) });
+  }
+});
+
+// Transcribe audio and generate notes
+app.post('/transcribe-audio', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'Missing required multipart file field: file' });
+    }
+
+    const mimeType = req.file.mimetype || 'audio/mp4';
+    const originalName = req.file.originalname || 'audio.m4a';
+
+    const transcriptText = await transcribeAudioWithOpenAI(req.file.path, mimeType, originalName);
+    const outputMode = normalizeOutputMode(req.body?.outputMode);
+
+    if (outputMode === 'flashcards') {
+      const payload = await generateFlashcardsPayloadFromText('audio transcript', transcriptText);
+      cleanupUploadedFile(req.file.path);
+      if (!payload.cards.length) {
+        return res.status(422).json({ error: 'Could not generate flashcards from this audio.' });
+      }
+      return res.json({
+        title: payload.title,
+        topic: payload.topic,
+        cards: payload.cards
+      });
+    }
+
+    if (outputMode === 'quiz') {
+      const payload = await generateQuizPayloadFromText('audio transcript', transcriptText);
+      cleanupUploadedFile(req.file.path);
+      if (!payload.questions.length) {
+        return res.status(422).json({ error: 'Could not generate a quiz from this audio.' });
+      }
+      return res.json({
+        title: payload.title,
+        topic: payload.topic,
+        questions: payload.questions
+      });
+    }
+
+    const notesPrompt = [
+      'Convert the following transcript into an exhaustive markdown study sheet.',
+      'Do not omit any details from the transcript.',
+      '',
+      'STRICT formatting rules (follow exactly):',
+      '1. Start with "## Brief Overview" — a short paragraph summarizing the content.',
+      '2. Then "## Key Points" — a bullet list (- ) of the main ideas.',
+      '3. Then additional topic sections using "## " headings with a relevant emoji prefix (e.g. "## 📝 Topic Name").',
+      '4. Under each section use "### " subheadings for subtopics.',
+      '5. Use blockquotes (> ) for definitions and key concepts.',
+      '6. Prefix important callout lines with "Tip:", "Key Insight:", "Definition:", or "Warning:".',
+      '7. Use numbered lists (1. 2. 3.) for sequential steps or procedures.',
+      '8. Use bullet lists (- ) for non-sequential facts.',
+      '9. Put --- horizontal rules between major sections.',
+      '10. Keep equations in readable plain text/Unicode. For superscripts use ^ with parentheses for groups: x^2, x^(a+b), x^(n-1). For subscripts use _ with parentheses: a_n, x_(i+1). Never use LaTeX or curly braces {}.',
+      '11. No code fences. No long prose paragraphs.',
+      '12. When the source has tables, diagrams, or comparison data, reproduce them as markdown tables (| Header | Header |).',
+      '',
+      'Transcript:',
+      transcriptText
+    ].join('\n');
+
+    const titlePrompt = [
+      'Given the following audio transcript, generate a short, descriptive title (5-10 words max) that captures the main topic.',
+      'Return ONLY the title text, nothing else. No quotes, no formatting, no explanation.',
+      '',
+      'Transcript:',
+      transcriptText.slice(0, 3000)
+    ].join('\n');
+
+    const [rawNotes, generatedTitle] = await Promise.all([
+      generateNotesWithOpenAI(notesPrompt),
+      generateNotesWithOpenAI(titlePrompt, { model: 'gpt-4o-mini' })
+    ]);
+    const notes = await formatNotesForApp(rawNotes, 'audio lecture notes', { forceSecondPass: true });
+    const title = generatedTitle.replace(/^["']|["']$/g, '').trim() || 'Lecture notes';
+
+    cleanupUploadedFile(req.file.path);
+
+    return res.json({
+      title,
+      notes
+    });
+  } catch (error) {
+    console.error('❌ transcribe-audio failed:', error);
+    cleanupUploadedFile(req.file?.path);
+    return res.status(500).json({ error: error.message || String(error) });
+  }
 });
 
 // SSE endpoint for live streaming

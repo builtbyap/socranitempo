@@ -1,5 +1,5 @@
 # Fly.io configuration for Playwright service
-app = "surgeapp-playwright"
+app = "socrani-api-proxy"
 primary_region = "iad"
 
 [build]

@@ -42,6 +42,14 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>surgeapp needs the microphone to record voice notes.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>surgeapp needs the camera to capture homework problems for solving.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>surgeapp needs access to your photos to upload images for homework solving.</string>
+	<key>FlyServiceBaseURL</key>
+	<string>https://socrani-api-proxy.fly.dev</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

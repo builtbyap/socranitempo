@@ -93,10 +93,12 @@ serve(async (req) => {
     
     // Use The Muse, Workday, and JobSpy for job searching
     // All sources will be searched for each query
+    // Order matters: The Muse is fastest (1-2s), then Workday (5-10s per company), then JobSpy (30-120s)
+    // This allows quick returns if The Muse finds jobs
     const sources = [
-      { name: 'The Muse', fn: scrapeTheMuse },
-      { name: 'Workday', fn: scrapeWorkday },
-      { name: 'JobSpy', fn: fetchFromJobSpy }
+      { name: 'The Muse', fn: scrapeTheMuse }, // Fastest - usually returns in 1-2 seconds
+      { name: 'Workday', fn: scrapeWorkday },   // Medium - 5-10 seconds per company
+      { name: 'JobSpy', fn: fetchFromJobSpy }  // Slowest - can take 30-120 seconds
     ]
     
     console.log(`🔍 Searching ${sources.length} sources: ${sources.map(s => s.name).join(', ')}`)
@@ -105,8 +107,9 @@ serve(async (req) => {
     console.log(`   ✅ JobSpy: Multi-site scraper (LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google)`)
     
     // Early return threshold - if we get enough jobs, return immediately
-    // Increased threshold to ensure all sources are searched
-    const EARLY_RETURN_THRESHOLD = 100 // Return early if we have 100+ jobs (allows all sources to contribute)
+    // Lower threshold to return faster and avoid timeouts
+    // Return as soon as we have 20+ jobs OR after first source completes with any jobs
+    const EARLY_RETURN_THRESHOLD = 20 // Return early if we have 20+ jobs (much faster response)
     let shouldEarlyReturn = false
     
     // Search each query across all sources
@@ -159,6 +162,14 @@ serve(async (req) => {
               allJobs.push(...realJobs)
               sourceStats[source.name] = (sourceStats[source.name] || 0) + realJobs.length
               console.log(`✅ ${source.name}: Added ${realJobs.length} real jobs (filtered out ${jobs.length - realJobs.length} test jobs)`)
+              
+              // Quick return: If this is the first source (The Muse) and we have 10+ jobs, return immediately
+              // This makes jobs appear much faster since The Muse is usually the fastest source
+              if (allJobs.length >= 10 && source.name === 'The Muse') {
+                console.log(`⚡ Quick return: The Muse found ${allJobs.length} jobs, returning immediately for faster response`)
+                shouldEarlyReturn = true
+                break queryLoop
+              }
             } else if (jobs.length > 0) {
               console.warn(`⚠️ ${source.name}: All ${jobs.length} jobs were filtered out as test data`)
             }
@@ -215,6 +226,7 @@ serve(async (req) => {
       console.log('   - Network/timeout issues')
     } else {
       console.log(`✅ Successfully scraped ${allJobs.length} real jobs from web scraping`)
+      console.log(`⚡ Response time optimized: Returned after finding ${allJobs.length} jobs (early return threshold: ${EARLY_RETURN_THRESHOLD})`)
     }
 
     // Deduplicate jobs and ensure no test data
@@ -419,12 +431,19 @@ async function scrapeTheMuse(keywords: string, location: string, jobType: string
     // The Muse API returns jobs in different structures depending on version
     const jobResults = data.results || data.jobs || data.page?.results || []
     
-    if (!Array.isArray(jobResults) || jobResults.length === 0) {
-      console.log(`   ℹ️ The Muse: No results found`)
+    if (!Array.isArray(jobResults)) {
+      console.log(`   ⚠️ The Muse: Invalid response format - expected array, got: ${typeof jobResults}`)
+      console.log(`   📄 Response structure: ${JSON.stringify(Object.keys(data || {})).substring(0, 200)}`)
       return []
     }
     
-    console.log(`   📊 The Muse: Found ${jobResults.length} jobs`)
+    if (jobResults.length === 0) {
+      console.log(`   ℹ️ The Muse: No results found for "${searchKeywords}" in category "${category}" at "${locationParam}"`)
+      console.log(`   💡 The Muse API returned empty results - this may be normal if no jobs match your search`)
+      return []
+    }
+    
+    console.log(`   📊 The Muse: Found ${jobResults.length} jobs for "${searchKeywords}"`)
     
     // Map The Muse jobs to our format
     for (const job of jobResults) {
@@ -1046,7 +1065,8 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
     ]
     
     // Limit companies to avoid timeout - search first 10 companies
-    const companiesToSearch = workdayCompanies.slice(0, 10)
+    // Limit to 5 companies for faster response (reduced from 10)
+    const companiesToSearch = workdayCompanies.slice(0, 5)
     
     console.log(`🔍 Workday: Searching ${companiesToSearch.length} companies using JSON API (like sorce.jobs) with keyword-based filtering: "${keywords || 'all jobs'}"`)
     
@@ -1146,6 +1166,7 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
         let filterPayload = format1
         
         console.log(`   🔍 ${tenant}: Filter payload - searchText: "${searchText}", location: "${validLocation ? location : 'none'}", jobType: "${jobType || 'all'}", careerInterests: ${careerInterests.length > 0 ? careerInterests.join(', ') : 'none'}`)
+        console.log(`   💡 Note: Workday's searchText may not filter perfectly, so we apply client-side keyword filtering`)
         
         // Paginate through all jobs
         let offset = 0
@@ -1153,7 +1174,7 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
         let hasMore = true
         let totalJobsForCompany = 0
         
-        while (hasMore && offset < 200) { // Limit to 200 jobs per company to avoid timeout
+        while (hasMore && offset < 100) { // Limit to 100 jobs per company (reduced from 200) to avoid timeout
           try {
             filterPayload.offset = offset
             filterPayload.limit = limit
@@ -1193,70 +1214,98 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
               console.log(`   ⚠️ ${tenant}: API error ${apiResponse.status}: ${errorText.substring(0, 200)}`)
               
               // If 422 error, the payload format is wrong - try alternative format
-              if (apiResponse.status === 422 && offset === 0) {
-                console.log(`   🔄 ${tenant}: Trying alternative payload format (422 error suggests wrong format)`)
-                
-                // Try simpler payload without appliedFacets (if it was included)
-                const simplePayload: any = {
-                  limit: 20,
-                  offset: offset,
-                  searchText: searchText
-                }
-                
-                // Only add location if it's a valid location (not "all" or empty)
-                if (location && location.trim().length > 0 && location.toLowerCase() !== 'all' && location.toLowerCase() !== 'none') {
-                  simplePayload.appliedFacets = {
-                    location: [location]
+              if (apiResponse.status === 422) {
+                if (offset === 0) {
+                  // Try alternative format on first page
+                  console.log(`   🔄 ${tenant}: Trying alternative payload format (422 error suggests wrong format)`)
+                  
+                  // Try simpler payload without appliedFacets (if it was included)
+                  const simplePayload: any = {
+                    limit: 20,
+                    offset: offset,
+                    searchText: searchText
                   }
-                }
-                
-                try {
-                  const retryController = new AbortController()
-                  const retryTimeoutId = setTimeout(() => retryController.abort(), 30000)
                   
-                  const retryResponse = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                      'Accept': 'application/json',
-                      'Origin': `https://${tenant}.${shard}.myworkdayjobs.com`,
-                      'Referer': `https://${tenant}.${shard}.myworkdayjobs.com/${site}`
-                    },
-                    body: JSON.stringify(simplePayload),
-                    signal: retryController.signal
-                  })
-                  
-                  clearTimeout(retryTimeoutId)
-                  
-                  if (retryResponse.ok) {
-                    console.log(`   ✅ ${tenant}: Alternative payload format worked!`)
-                    // Use retryResponse instead of apiResponse
-                    const retryResult = await retryResponse.json()
-                    const jobPostings = retryResult.jobPostings || retryResult.jobs || retryResult.jobPosting || []
-                    hasMore = retryResult.hasMore !== undefined ? retryResult.hasMore : (jobPostings.length >= limit)
-                    
-                    // Process jobs from retry response (continue to job processing below)
-                    if (jobPostings.length > 0) {
-                      console.log(`   📊 ${tenant}: Found ${jobPostings.length} jobs with alternative format`)
-                      // Process jobs normally below
-                      // We'll handle this by setting apiResult to retryResult
-                      const apiResult = retryResult
-                      // Continue with normal processing...
-                      // Actually, we need to restructure this - let's just break and log
-                      console.log(`   ⚠️ ${tenant}: Need to restructure to handle retry response properly`)
+                  // Only add location if it's a valid location (not "all" or empty)
+                  if (location && location.trim().length > 0 && location.toLowerCase() !== 'all' && location.toLowerCase() !== 'none') {
+                    simplePayload.appliedFacets = {
+                      location: [location]
                     }
-                    break // For now, break and try next company
-                  } else {
-                    const retryErrorText = await retryResponse.text()
-                    console.log(`   ⚠️ ${tenant}: Alternative format also failed: ${retryResponse.status} - ${retryErrorText.substring(0, 100)}`)
                   }
-                } catch (retryErr) {
-                  console.log(`   ⚠️ ${tenant}: Retry failed: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`)
+                  
+                  try {
+                    const retryController = new AbortController()
+                    const retryTimeoutId = setTimeout(() => retryController.abort(), 30000)
+                    
+                    const retryResponse = await fetch(apiUrl, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'application/json',
+                        'Origin': `https://${tenant}.${shard}.myworkdayjobs.com`,
+                        'Referer': `https://${tenant}.${shard}.myworkdayjobs.com/${site}`
+                      },
+                      body: JSON.stringify(simplePayload),
+                      signal: retryController.signal
+                    })
+                    
+                    clearTimeout(retryTimeoutId)
+                    
+                    if (retryResponse.ok) {
+                      console.log(`   ✅ ${tenant}: Alternative payload format worked!`)
+                      // Use retryResponse instead of apiResponse
+                      const retryResult = await retryResponse.json()
+                      const jobPostings = retryResult.jobPostings || retryResult.jobs || retryResult.jobPosting || []
+                      hasMore = retryResult.hasMore !== undefined ? retryResult.hasMore : (jobPostings.length >= limit)
+                      
+                      // Process jobs from retry response
+                      if (jobPostings.length > 0) {
+                        console.log(`   📊 ${tenant}: Found ${jobPostings.length} jobs with alternative format`)
+                        // Process jobs from retry response
+                        for (const job of jobPostings) {
+                          const jobTitle = job.title || job.jobTitle || job.jobTitleText || 'Job Title'
+                          const jobUrl = job.externalPath || job.external_url_path || job.jobPostingInfo?.jobPostingId || null
+                          const fullJobUrl = jobUrl ? `https://${tenant}.${shard}.myworkdayjobs.com/${site}${jobUrl}` : null
+                          
+                          jobs.push({
+                            id: `workday_${tenant}_${job.jobPostingId || job.id || Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                            title: jobTitle,
+                            company: tenant.charAt(0).toUpperCase() + tenant.slice(1), // Capitalize company name
+                            location: job.locationsText || job.location || location || 'Location not specified',
+                            posted_date: job.postedOn ? new Date(job.postedOn).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                            description: job.description || job.jobDescription || null,
+                            url: fullJobUrl,
+                            salary: formatSalaryText(job.salary || job.compensation || null),
+                            job_type: job.timeType || job.jobType || null,
+                          })
+                          totalJobsForCompany++
+                        }
+                        console.log(`   ✅ ${tenant}: Added ${jobPostings.length} jobs from alternative format`)
+                      }
+                      // Continue to next offset/page
+                      offset += limit
+                      continue // Continue pagination
+                    } else {
+                      const retryErrorText = await retryResponse.text()
+                      console.log(`   ⚠️ ${tenant}: Alternative format also failed: ${retryResponse.status} - ${retryErrorText.substring(0, 100)}`)
+                      // Skip this company if both formats fail
+                      console.log(`   ⏭️ ${tenant}: Skipping company (payload format not compatible)`)
+                      break // Stop trying this company
+                    }
+                  } catch (retryErr) {
+                    console.log(`   ⚠️ ${tenant}: Retry failed: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`)
+                    break // Stop trying this company
+                  }
+                } else {
+                  // 422 on later pages - skip this company
+                  console.log(`   ⏭️ ${tenant}: 422 error on page ${offset / limit + 1}, skipping company`)
+                  break
                 }
+              } else {
+                // Other errors - stop pagination for this company
+                break
               }
-              
-              break // Stop pagination for this company
             }
             
             const apiResult = await apiResponse.json()
@@ -1271,6 +1320,10 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
               console.log(`   📊 ${tenant}: API response - jobPostings: ${jobPostings.length}, hasMore: ${hasMore}, total: ${apiResult.total || 'unknown'}`)
               if (jobPostings.length > 0) {
                 console.log(`   📋 ${tenant}: Sample job structure:`, JSON.stringify(Object.keys(jobPostings[0])).substring(0, 200))
+                // Log sample job title to verify searchText is working
+                const sampleTitle = jobPostings[0].title?.text || jobPostings[0].title || jobPostings[0].jobTitle || 'N/A'
+                console.log(`   📋 ${tenant}: Sample job title: "${sampleTitle}"`)
+                console.log(`   🔍 ${tenant}: Will filter by keywords: "${searchText}"`)
               }
             }
             
@@ -1315,43 +1368,51 @@ async function scrapeWorkday(keywords: string, location: string, careerInterests
                   jobType = job.workShift
                 }
                 
-                // Workday API already filters via searchText and appliedFacets
-                // We trust Workday's filtering - don't apply additional client-side filtering
-                // This ensures we get the same results as Workday's UI
-                // Only apply very lenient filtering if we have way too many jobs (100+)
+                // Workday API may not filter properly via searchText, so we apply client-side filtering
+                // This ensures we only return jobs that match the keywords
                 let shouldInclude = true
                 
-                // Only filter if we have 100+ jobs (very lenient threshold)
-                if (jobs.length >= 100) {
-                  if (keywords && keywords.trim().length > 0) {
-                    const jobText = `${title} ${jobDescription || ''} ${jobLocation}`.toLowerCase()
-                    const keywordsLower = keywords.toLowerCase()
-                    
-                    // Split by "OR" for multiple keywords
-                    const keywordParts = keywordsLower.split(/\s+or\s+/).map(k => k.trim())
-                    const matchesKeyword = keywordParts.some(part => {
-                      const parts = part.split(/\s+/).filter(p => p.length > 2)
-                      if (parts.length === 0) return true
-                      return parts.some(p => jobText.includes(p)) || jobText.includes(part)
-                    })
-                    
-                    // Only filter if keyword doesn't match at all AND we have 100+ jobs
-                    if (!matchesKeyword) {
-                      shouldInclude = false
+                // Always apply keyword filtering (not just when we have 100+ jobs)
+                if (keywords && keywords.trim().length > 0) {
+                  const jobText = `${title} ${jobDescription || ''} ${jobLocation}`.toLowerCase()
+                  const keywordsLower = keywords.toLowerCase()
+                  
+                  // Split by "OR" for multiple keywords
+                  const keywordParts = keywordsLower.split(/\s+or\s+/).map(k => k.trim())
+                  const matchesKeyword = keywordParts.some(part => {
+                    const parts = part.split(/\s+/).filter(p => p.length > 2)
+                    if (parts.length === 0) return true
+                    // Check if any part of the keyword appears in the job text
+                    return parts.some(p => jobText.includes(p)) || jobText.includes(part)
+                  })
+                  
+                  // Filter out jobs that don't match keywords
+                  if (!matchesKeyword) {
+                    shouldInclude = false
+                    // Log filtered jobs for debugging (only first few)
+                    if (jobs.length < 5) {
+                      console.log(`   🚫 ${tenant}: Filtered out job "${title}" - doesn't match keywords "${keywords}"`)
                     }
                   }
+                }
+                
+                // Location filtering - apply if location is specified
+                if (location && location.trim().length > 0 && shouldInclude) {
+                  const locationLower = location.toLowerCase()
+                  const jobLocationLower = jobLocation.toLowerCase()
                   
-                  // Location filtering - very lenient (only if we have 100+ jobs)
-                  if (location && location.trim().length > 0 && shouldInclude) {
-                    const locationLower = location.toLowerCase()
-                    const jobLocationLower = jobLocation.toLowerCase()
-                    
-                    const locationMatches = jobLocationLower.includes(locationLower) || 
-                                           locationLower.includes(jobLocationLower.split(',')[0].trim()) ||
-                                           jobLocationLower.includes('remote')
-                    
-                    if (!locationMatches) {
-                      shouldInclude = false
+                  // Very lenient location matching
+                  const locationMatches = jobLocationLower.includes(locationLower) || 
+                                         locationLower.includes(jobLocationLower.split(',')[0].trim()) ||
+                                         jobLocationLower.includes('remote') ||
+                                         locationLower === 'all' ||
+                                         locationLower === 'none'
+                  
+                  if (!locationMatches) {
+                    shouldInclude = false
+                    // Log filtered jobs for debugging (only first few)
+                    if (jobs.length < 5) {
+                      console.log(`   🚫 ${tenant}: Filtered out job "${title}" - location "${jobLocation}" doesn't match "${location}"`)
                     }
                   }
                 }
@@ -2083,6 +2144,9 @@ async function fetchFromJobSpy(
     // You'll need to deploy the JobSpy service and set this URL
     const jobspyServiceUrl = Deno.env.get('JOBSPY_SERVICE_URL') || 'http://localhost:8000'
     
+    // Log the service URL (without credentials) for debugging
+    console.log(`🔗 JobSpy service URL: ${jobspyServiceUrl.replace(/\/\/[^:]+:[^@]+@/, '//***:***@')}`)
+    
     // Build search term from career interests or keywords
     const searchTerm = careerInterests.length > 0 
       ? careerInterests.join(' OR ')
@@ -2103,7 +2167,7 @@ async function fetchFromJobSpy(
       url.searchParams.set('job_type', jobType) // Pass job_type to JobSpy (internship, fulltime, parttime, contract)
       console.log(`🎯 JobSpy: Filtering for job type: ${jobType}`)
     }
-    url.searchParams.set('results_wanted', '30') // Limit per site to avoid timeout
+    url.searchParams.set('results_wanted', '20') // Reduced from 30 to 20 for faster response
     url.searchParams.set('site_name', sites.join(','))
     url.searchParams.set('country', 'usa')
     
@@ -2116,9 +2180,9 @@ async function fetchFromJobSpy(
     
     console.log(`📡 Calling JobSpy service: ${url.toString()}`)
     
-    // Call JobSpy service with timeout
+    // Call JobSpy service with timeout (increased for slow responses)
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 120000) // 120 second timeout (JobSpy can be slow)
     
     try {
       const response = await fetch(url.toString(), {
@@ -2168,16 +2232,23 @@ async function fetchFromJobSpy(
       
       console.log(`✅ JobSpy: After filtering Adzuna URLs: ${jobs.length} jobs`)
       
-    } catch (fetchError) {
+    } catch (fetchError: unknown) {
       clearTimeout(timeoutId)
-      if (fetchError.name === 'AbortError') {
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
         throw new Error('JobSpy service timeout')
       }
       throw fetchError
     }
     
-  } catch (error) {
-    console.error(`❌ JobSpy scraping failed: ${error instanceof Error ? error.message : String(error)}`)
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    console.error(`❌ JobSpy scraping failed: ${errorMsg}`)
+    if (errorMsg.includes('timeout') || errorMsg.includes('AbortError')) {
+      const jobspyServiceUrl = Deno.env.get('JOBSPY_SERVICE_URL') || 'http://localhost:8000'
+      console.error(`   ⏱️ JobSpy service timed out after 120 seconds`)
+      console.error(`   💡 The JobSpy service may be slow or overloaded. Check: ${jobspyServiceUrl}/health`)
+      console.error(`   💡 Consider reducing results_wanted or checking if the service is running`)
+    }
     // Don't throw - return empty array so other sources can still work
   }
   
