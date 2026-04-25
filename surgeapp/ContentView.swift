@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var selectedScreen: AppScreen = .notes
     @State private var isAskSearchPresented = false
     @State private var askSearchText = ""
+    /// Fires `campaign_trigger` once per `ContentView` lifetime (main app shell after sign-in).
+    @State private var didRegisterCampaignTrigger = false
 
     private var showMainTabTitleBar: Bool {
         !(selectedScreen == .study && store.hidesStudyTabTitleBarForSession)
@@ -60,6 +62,11 @@ struct ContentView: View {
         }
         .background(Color.white)
         .preferredColorScheme(.light)
+        .onAppear {
+            guard !didRegisterCampaignTrigger else { return }
+            didRegisterCampaignTrigger = true
+            registerSuperwallPlacement(SuperwallPlacements.campaignTrigger)
+        }
         .onChange(of: selectedScreen) { _, new in
             if new != .study {
                 store.hidesStudyTabTitleBarForSession = false

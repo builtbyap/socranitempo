@@ -72,7 +72,7 @@ struct ProfileView: View {
                     .padding(.horizontal, 16)
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        Superwall.shared.register(placement: "manage_subscription_tapped")
+                        registerSuperwallPlacement(SuperwallPlacements.manageSubscriptionTapped)
                     }
                     sectionDivider
                     settingsRow(symbol: "clock.arrow.circlepath", title: "Restore Purchases") {
@@ -259,7 +259,7 @@ struct ProfileView: View {
 
     private var upgradeCTAButton: some View {
         Button {
-            Superwall.shared.register(placement: "upgrade_tapped")
+            registerSuperwallPlacement(SuperwallPlacements.upgradeTapped)
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "sparkles")

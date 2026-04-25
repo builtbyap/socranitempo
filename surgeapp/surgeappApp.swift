@@ -15,7 +15,11 @@ struct surgeappApp: App {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     init() {
-        Superwall.configure(apiKey: "pk__dM27Q_hpwnEDIlXZ6sYn")
+        let options = SuperwallOptions()
+        // Required for real App Store / Sandbox purchases. Default `.automatic` turns on Test mode
+        // (simulated “SUPERWALL” sheet) when bundle ID doesn’t match the dashboard or for test users.
+        options.testModeBehavior = .never
+        Superwall.configure(apiKey: "pk__dM27Q_hpwnEDIlXZ6sYn", options: options)
     }
 
     var body: some Scene {
