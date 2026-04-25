@@ -8,13 +8,18 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var store = StudyStore()
+    @EnvironmentObject private var store: StudyStore
+    @EnvironmentObject private var auth: AuthSessionManager
     @State private var selectedScreen: AppScreen = .notes
     @State private var isAskSearchPresented = false
     @State private var askSearchText = ""
 
     private var showMainTabTitleBar: Bool {
         !(selectedScreen == .study && store.hidesStudyTabTitleBarForSession)
+    }
+
+    private var hideTabBarForImmersiveStudy: Bool {
+        selectedScreen == .study && store.hidesStudyTabTitleBarForSession
     }
 
     var body: some View {
@@ -33,18 +38,7 @@ struct ContentView: View {
             }
 
             ZStack {
-                Group {
-                    switch selectedScreen {
-                    case .notes:
-                        NotesView()
-                    case .study:
-                        StudyView()
-                    case .assistant:
-                        AssistantView()
-                    case .library:
-                        LibraryView()
-                    }
-                }
+                tabbedRoot
 
                 if isAskSearchPresented {
                     Rectangle()
@@ -66,15 +60,52 @@ struct ContentView: View {
         }
         .background(Color.white)
         .preferredColorScheme(.light)
-        .environmentObject(store)
         .onChange(of: selectedScreen) { _, new in
             if new != .study {
                 store.hidesStudyTabTitleBarForSession = false
             }
         }
+        .task(id: auth.syncUserId) {
+            if !auth.isSupabaseConfigured {
+                store.configureCloudSync(client: nil, userId: nil)
+                store.loadDemoDataIfEmpty()
+                return
+            }
+            guard let uid = auth.syncUserId, let client = auth.client else {
+                store.configureCloudSync(client: nil, userId: nil)
+                return
+            }
+            store.configureCloudSync(client: client, userId: uid)
+            await store.mergeCloudDataFromOtherAccountsWithSameEmail()
+            await store.loadFromCloud()
+        }
+    }
+
+    @ViewBuilder
+    private var tabbedRoot: some View {
+        TabView(selection: $selectedScreen) {
+            ForEach(AppScreen.allCases) { screen in
+                Group {
+                    switch screen {
+                    case .notes: NotesView()
+                    case .study: StudyView()
+                    case .assistant: AssistantView()
+                    case .profile: ProfileView()
+                    }
+                }
+                .tag(screen)
+                .tabItem {
+                    Label(screen.title, systemImage: screen.menuSymbol)
+                }
+            }
+        }
+        .tint(Color(red: 0.45, green: 0.32, blue: 0.78))
+        .toolbar(hideTabBarForImmersiveStudy ? .hidden : .automatic, for: .tabBar)
     }
 }
 
 #Preview {
     ContentView()
+        .environmentObject(StudyStore())
+        .environmentObject(AuthSessionManager())
 }

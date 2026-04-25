@@ -9,6 +9,7 @@
 import Foundation
 
 // Fly.io: set Info.plist key `FlyServiceBaseURL` (default is socrani-api-proxy.fly.dev). See FlyService.swift.
+// Supabase: set `SupabaseURL` and `SupabaseAnonKey` in Config/Info.plist (not this file). See SupabaseConfig.swift.
 
 struct Config {
     static let supabaseURL = "YOUR_SUPABASE_URL_HERE"

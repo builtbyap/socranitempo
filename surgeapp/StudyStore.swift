@@ -3,8 +3,10 @@
 //  surgeapp
 //
 
-import Foundation
 import Combine
+import Foundation
+import OSLog
+import Supabase
 
 /// Controls whether Fly APIs produce markdown notes, a flashcard deck, or a multiple-choice quiz (Study tab).
 enum StudyGenerationOutput: String, Sendable {
@@ -15,6 +17,12 @@ enum StudyGenerationOutput: String, Sendable {
 
 @MainActor
 final class StudyStore: ObservableObject {
+    private static let log = Logger(subsystem: "com.socrani.surgeapp", category: "StudySync")
+
+    /// When set, study data is loaded from and pushed to Supabase for `cloudUserId`.
+    private var cloudClient: SupabaseClient?
+    private var cloudUserId: UUID?
+
     @Published var notes: [StudyNote]
     @Published var decks: [StudyDeck]
     @Published var quizzes: [StudyQuiz]
@@ -31,10 +39,10 @@ final class StudyStore: ObservableObject {
     @Published var quizPendingAutoPresent: StudyQuiz?
 
     init(
-        notes: [StudyNote] = StudyStore.sampleNotes,
-        decks: [StudyDeck] = StudyStore.sampleDecks,
+        notes: [StudyNote] = [],
+        decks: [StudyDeck] = [],
         quizzes: [StudyQuiz] = [],
-        recordings: [RecordingItem] = StudyStore.sampleRecordings
+        recordings: [RecordingItem] = []
     ) {
         self.notes = notes
         self.decks = decks
@@ -42,11 +50,60 @@ final class StudyStore: ObservableObject {
         self.recordings = recordings
     }
 
+    /// Set before `loadFromCloud()`; pass `nil` on sign-out.
+    func configureCloudSync(client: SupabaseClient?, userId: UUID?) {
+        cloudClient = client
+        cloudUserId = userId
+    }
+
+    /// After sign-in, moves server study rows to this session if another auth account exists with the same
+    /// email (e.g. prior Google + new Apple). Safe to call every launch; it no-ops when there is no duplicate.
+    func mergeCloudDataFromOtherAccountsWithSameEmail() async {
+        guard let client = cloudClient, cloudUserId != nil else { return }
+        do {
+            try await StudySyncService(client: client).mergeStudyDataFromOtherAccountsWithSameEmail()
+        } catch {
+            Self.log.error("merge by same email failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Replaces local study data with the user’s server rows. Call when the session becomes available.
+    func loadFromCloud() async {
+        guard let client = cloudClient, let userId = cloudUserId else { return }
+        do {
+            let data = try await StudySyncService(client: client).fetchAll(userId: userId)
+            notes = data.notes
+            decks = data.decks
+            quizzes = data.quizzes
+            recordings = data.recordings
+        } catch {
+            Self.log.error("loadFromCloud failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Clear sync context and in-memory data after sign-out.
+    func clearCloudDataAndResetLocal() {
+        configureCloudSync(client: nil, userId: nil)
+        notes = []
+        decks = []
+        quizzes = []
+        recordings = []
+    }
+
+    /// Offline / no-Supabase mode: seed demo content once if everything is empty.
+    func loadDemoDataIfEmpty() {
+        guard notes.isEmpty, decks.isEmpty, quizzes.isEmpty, recordings.isEmpty else { return }
+        notes = Self.sampleNotes
+        decks = Self.sampleDecks
+        recordings = Self.sampleRecordings
+    }
+
     @discardableResult
     func addNote(title: String, body: String, tags: [String]) -> UUID {
         let cleanedTags = tags.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         let newNote = StudyNote(title: title, body: body, tags: cleanedTags)
         notes.insert(newNote, at: 0)
+        scheduleCloud { s, u in try await s.upsertNote(userId: u, newNote) }
         return newNote.id
     }
 
@@ -62,6 +119,7 @@ final class StudyStore: ObservableObject {
             audioFilename: audioFilename
         )
         notes.insert(note, at: 0)
+        scheduleCloud { s, u in try await s.upsertNote(userId: u, note) }
     }
 
     /// Saves Notes-tab mic capture and generates transcript notes (or flashcards/quiz when `generationOutput` is set) via Fly proxy.
@@ -129,6 +187,7 @@ final class StudyStore: ObservableObject {
         let displayTitle = trimmed.isEmpty ? "Untitled recording" : trimmed
         let item = RecordingItem(title: displayTitle, kind: kind)
         recordings.insert(item, at: 0)
+        scheduleCloud { s, u in try await s.upsertRecording(userId: u, item) }
     }
 
     func removeNote(id: UUID) {
@@ -136,6 +195,7 @@ final class StudyStore: ObservableObject {
         let note = notes[idx]
         Self.removeAudioFileIfPresent(filename: note.audioFilename)
         notes.remove(at: idx)
+        scheduleCloud { s, _ in try await s.deleteNote(id: id) }
     }
 
     func removeRecording(id: UUID) {
@@ -143,6 +203,7 @@ final class StudyStore: ObservableObject {
         let item = recordings[idx]
         Self.removeAudioFileIfPresent(filename: item.audioFilename)
         recordings.remove(at: idx)
+        scheduleCloud { s, _ in try await s.deleteRecording(id: id) }
     }
 
     private static func removeAudioFileIfPresent(filename: String?) {
@@ -191,6 +252,7 @@ final class StudyStore: ObservableObject {
             sourceURL: normalized
         )
         recordings.insert(item, at: 0)
+        scheduleCloud { s, u in try await s.upsertRecording(userId: u, item) }
         return item.id
     }
 
@@ -316,6 +378,7 @@ final class StudyStore: ObservableObject {
             sourceURL: savedURL.absoluteString
         )
         recordings.insert(item, at: 0)
+        scheduleCloud { s, u in try await s.upsertRecording(userId: u, item) }
         return item.id
     }
 
@@ -384,6 +447,7 @@ final class StudyStore: ObservableObject {
             audioFilename: audioFilename
         )
         recordings.insert(item, at: 0)
+        scheduleCloud { s, u in try await s.upsertRecording(userId: u, item) }
         return item.id
     }
 
@@ -443,6 +507,7 @@ final class StudyStore: ObservableObject {
         // Reassign so `@Published` reliably emits (in-place `insert` can skip SwiftUI updates).
         decks = [deck] + decks
         deckPendingAutoPresent = deck
+        scheduleCloud { s, u in try await s.upsertDeck(userId: u, deck) }
         return deck.id
     }
 
@@ -457,12 +522,26 @@ final class StudyStore: ObservableObject {
         let quiz = StudyQuiz(title: title, topic: topic, questions: qs)
         quizzes = [quiz] + quizzes
         quizPendingAutoPresent = quiz
+        scheduleCloud { s, u in try await s.upsertQuiz(userId: u, quiz) }
         return quiz.id
     }
 
     private func linkGeneratedNote(noteID: UUID, toRecordingID recordingID: UUID) {
         guard let idx = recordings.firstIndex(where: { $0.id == recordingID }) else { return }
         recordings[idx].generatedNoteID = noteID
+        let rec = recordings[idx]
+        scheduleCloud { s, u in try await s.upsertRecording(userId: u, rec) }
+    }
+
+    private func scheduleCloud(_ op: @escaping (StudySyncService, UUID) async throws -> Void) {
+        guard let client = cloudClient, let userId = cloudUserId else { return }
+        Task {
+            do {
+                try await op(StudySyncService(client: client), userId)
+            } catch {
+                Self.log.error("cloud sync: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     static let sampleNotes: [StudyNote] = [

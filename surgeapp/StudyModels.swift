@@ -5,7 +5,7 @@
 
 import Foundation
 
-struct StudyNote: Identifiable, Hashable {
+struct StudyNote: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
     var body: String
@@ -31,7 +31,7 @@ struct StudyNote: Identifiable, Hashable {
     }
 }
 
-struct Flashcard: Identifiable, Hashable {
+struct Flashcard: Identifiable, Hashable, Codable {
     let id: UUID
     var front: String
     var back: String
@@ -45,7 +45,7 @@ struct Flashcard: Identifiable, Hashable {
     }
 }
 
-struct StudyDeck: Identifiable, Hashable {
+struct StudyDeck: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
     var topic: String
@@ -59,7 +59,7 @@ struct StudyDeck: Identifiable, Hashable {
     }
 }
 
-struct QuizQuestion: Identifiable, Hashable {
+struct QuizQuestion: Identifiable, Hashable, Codable {
     let id: UUID
     var question: String
     var options: [String]
@@ -73,7 +73,7 @@ struct QuizQuestion: Identifiable, Hashable {
     }
 }
 
-struct StudyQuiz: Identifiable, Hashable {
+struct StudyQuiz: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
     var topic: String
@@ -87,7 +87,7 @@ struct StudyQuiz: Identifiable, Hashable {
     }
 }
 
-enum RecordingKind: String, CaseIterable, Identifiable, Hashable {
+enum RecordingKind: String, CaseIterable, Identifiable, Hashable, Codable {
     case lecture
     case meeting
     case other
@@ -103,7 +103,7 @@ enum RecordingKind: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-struct RecordingItem: Identifiable, Hashable {
+struct RecordingItem: Identifiable, Hashable, Codable {
     let id: UUID
     var title: String
     var kind: RecordingKind

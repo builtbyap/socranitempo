@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-/// Centered title + FREE badge + search; section switching lives in the ⋯ menu.
+/// Centered title + FREE badge + search. Section switching is the bottom tab bar in `ContentView`.
 struct TabTitleBar: View {
     @Binding var selectedScreen: AppScreen
     @Binding var isAskSearchPresented: Bool
@@ -107,20 +107,6 @@ struct TabTitleBar: View {
             } label: {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.primary)
-            }
-
-            Menu {
-                ForEach(AppScreen.allCases) { screen in
-                    Button {
-                        selectedScreen = screen
-                    } label: {
-                        Label(screen.title, systemImage: screen.menuSymbol)
-                    }
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(.primary)
             }
         }

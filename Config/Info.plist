@@ -48,16 +48,34 @@
 	<string>surgeapp needs the camera to capture homework problems for solving.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>surgeapp needs access to your photos to upload images for homework solving.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>Socrani can remind you to study and keep your streaks.</string>
 	<key>FlyServiceBaseURL</key>
 	<string>https://socrani-api-proxy.fly.dev</string>
+	<key>SupabaseURL</key>
+	<string>https://jlkebdnvjjdwedmbfqou.supabase.co</string>
+	<key>SupabaseAnonKey</key>
+	<string>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impsa2ViZG52ampkd2VkbWJmcW91Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE0NzU5NjQsImV4cCI6MjA1NzA1MTk2NH0.0dyDFawIks508PffUcovXN-M8kaAOgomOhe5OiEal3o</string>
+	<key>GoogleClientID</key>
+	<string>977151553799-j7m3p4iv8kj1oll5v94715o3b72epf05.apps.googleusercontent.com</string>
+	<key>GoogleServerClientID</key>
+	<string>977151553799-jgv0emdvol6buraac8u2fo3iuom1q3a6.apps.googleusercontent.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.googleusercontent.apps.492159417791-bb0baa5c892gcqu0hneutrio1uuqh4l8</string>
+			<string>com.googleusercontent.apps.977151553799-j7m3p4iv8kj1oll5v94715o3b72epf05</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.492159417791-bb0baa5c892gcqu0hneutrio1uuqh4l8</string>
+				<string>com.googleusercontent.apps.977151553799-j7m3p4iv8kj1oll5v94715o3b72epf05</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.socrani.surgeapp.oauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.socrani.surgeapp</string>
 			</array>
 		</dict>
 	</array>
