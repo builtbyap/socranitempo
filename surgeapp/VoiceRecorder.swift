@@ -28,6 +28,10 @@ final class VoiceRecorder: NSObject, ObservableObject {
     private var meterTimer: Timer?
     private let maxHistoryCount = 50
 
+    /// When `destination == .assistant`, if set this runs instead of the default `StudyStore.addMicrophoneRecordingAndGenerateNotes` (allows Assistant-only quota hooks).
+    @MainActor
+    var onAssistantMicRecordingFinished: ((StudyStore, TimeInterval, String) async -> Void)?
+
     init(destination: VoiceRecorderDestination = .notes) {
         self.destination = destination
         super.init()
@@ -172,7 +176,14 @@ final class VoiceRecorder: NSObject, ObservableObject {
             }
         case .assistant:
             Task { @MainActor in
-                await store.addMicrophoneRecordingAndGenerateNotes(duration: duration, audioFilename: filename)
+                if let handler = self.onAssistantMicRecordingFinished {
+                    await handler(store, duration, filename)
+                } else {
+                    await store.addMicrophoneRecordingAndGenerateNotes(
+                        duration: duration,
+                        audioFilename: filename
+                    )
+                }
             }
         }
         recordingURL = nil

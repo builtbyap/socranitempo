@@ -5,6 +5,7 @@ const express = require('express');
 const { chromium } = require('playwright');
 const cors = require('cors');
 const multer = require('multer');
+const { mountSuperwallWebhook } = require('./superwallWebhook');
 const fs = require('fs');
 const app = express();
 const upload = multer({ dest: '/tmp' });
@@ -37,6 +38,7 @@ function getProxyConfig() {
 }
 
 app.use(cors());
+mountSuperwallWebhook(app);
 app.use(express.json({ limit: '10mb' }));
 
 // Store active streams (sessionId -> response object)

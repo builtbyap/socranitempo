@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import SuperwallKit
 import UniformTypeIdentifiers
 import UIKit
 import AVFoundation
@@ -11,6 +12,7 @@ import Photos
 
 struct AssistantView: View {
     @EnvironmentObject private var store: StudyStore
+    @EnvironmentObject private var auth: AuthSessionManager
     @StateObject private var voiceRecorder = VoiceRecorder(destination: .assistant)
     @State private var showAddSheet = false
     @State private var showLinkSheet = false
@@ -419,6 +421,14 @@ struct AssistantView: View {
     }
 
     private func solveHomeworkFromImage(_ image: UIImage) async {
+        guard FreeTierUsageTracker.shared.canAnalyzeHomeworkImage(
+            subscriptionStatus: auth.subscriptionStatusFromDB,
+            subscriptionType: auth.subscriptionTypeFromDB
+        ) else {
+            registerSuperwallPlacement(SuperwallPlacements.freeTierLimit)
+            return
+        }
+
         isSolvingHomework = true
 
         let imageURL: URL? = await Task.detached(priority: .userInitiated) { () -> URL? in
@@ -453,6 +463,10 @@ struct AssistantView: View {
                 title: solutionTitle,
                 body: result.notes ?? "",
                 tags: ["homework", "solver"]
+            )
+            FreeTierUsageTracker.shared.recordSuccessfulHomeworkImageAnalysis(
+                subscriptionStatus: auth.subscriptionStatusFromDB,
+                subscriptionType: auth.subscriptionTypeFromDB
             )
             selectedGeneratedNote = solutionNote
         } catch {
@@ -1677,4 +1691,5 @@ private struct WebsiteGlobeIcon: View {
 #Preview {
     AssistantView()
         .environmentObject(StudyStore())
+        .environmentObject(AuthSessionManager())
 }

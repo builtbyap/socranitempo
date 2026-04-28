@@ -30,14 +30,35 @@ struct OnboardingCarouselView: View {
     @State private var selectedReferral: String?
     @State private var showOnboardingAddSheet = false
     @State private var didAutoPresentUploadAddSheet = false
+    /// Title of the add action chosen on the upload step (matches `AssistantAddOptionsSheet` row labels).
+    @State private var onboardingUploadSelection: String?
+    /// Cancellable wait before auto-advancing from the upload step (3s after a choice is shown).
+    @State private var uploadAutoAdvanceTask: Task<Void, Never>?
     /// Selected onboarding quiz option (`A`…`D`); `nil` until the user taps.
     @State private var onboardingQuizSelection: String?
     private let totalPages = 8
     private let onboardingQuizCorrectLetter = "B"
+    /// Space between the page title block and the options / examples below (replaces flex `Spacer` that pulled them apart).
+    private let onboardingHeaderToBodySpacing: CGFloat = 20
+    /// Lifts the Upload Anything content slightly vs. vertically centered pages.
+    private let onboardingUploadPageVerticalNudge: CGFloat = -32
 
     /// Tab index for the upload step (same order as `TabView` tags).
     private var uploadPageIndex: Int { 4 }
     private var quizPageIndex: Int { 3 }
+    private var rolePageIndex: Int { 0 }
+    private var referralPageIndex: Int { 5 }
+
+    /// `Continue` is only shown on steps that require picking an option. Upload uses auto-advance instead.
+    private var isContinueUnlocked: Bool {
+        switch page {
+        case rolePageIndex: return selectedRole != nil
+        case quizPageIndex: return onboardingQuizSelection != nil
+        case uploadPageIndex: return false
+        case referralPageIndex: return selectedReferral != nil
+        default: return true
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -61,7 +82,11 @@ struct OnboardingCarouselView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.25), value: page)
-                .onChange(of: page) { _, newValue in
+                .onChange(of: page) { oldValue, newValue in
+                    if oldValue == uploadPageIndex, newValue != uploadPageIndex {
+                        uploadAutoAdvanceTask?.cancel()
+                        uploadAutoAdvanceTask = nil
+                    }
                     if newValue == uploadPageIndex, !didAutoPresentUploadAddSheet {
                         didAutoPresentUploadAddSheet = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
@@ -71,6 +96,12 @@ struct OnboardingCarouselView: View {
                     if newValue == quizPageIndex {
                         onboardingQuizSelection = nil
                     }
+                    if newValue == uploadPageIndex {
+                        scheduleUploadAutoAdvanceIfNeeded()
+                    }
+                }
+                .onChange(of: onboardingUploadSelection) { _, _ in
+                    scheduleUploadAutoAdvanceIfNeeded()
                 }
 
                 bottomBar
@@ -85,10 +116,22 @@ struct OnboardingCarouselView: View {
         }
         .sheet(isPresented: $showOnboardingAddSheet) {
             AssistantAddOptionsSheet(
-                onRecordAudio: { showOnboardingAddSheet = false },
-                onWebsite: { showOnboardingAddSheet = false },
-                onYouTube: { showOnboardingAddSheet = false },
-                onUploadDocument: { showOnboardingAddSheet = false }
+                onRecordAudio: {
+                    onboardingUploadSelection = "Record audio"
+                    showOnboardingAddSheet = false
+                },
+                onWebsite: {
+                    onboardingUploadSelection = "Import from website"
+                    showOnboardingAddSheet = false
+                },
+                onYouTube: {
+                    onboardingUploadSelection = "Add a YouTube link"
+                    showOnboardingAddSheet = false
+                },
+                onUploadDocument: {
+                    onboardingUploadSelection = "Upload document"
+                    showOnboardingAddSheet = false
+                }
             )
             .environmentObject(store)
             .presentationDetents([.height(420)])
@@ -150,21 +193,19 @@ struct OnboardingCarouselView: View {
                 }
                 .buttonStyle(.plain)
             }
-        } else {
+        } else if isContinueUnlocked {
             Button {
                 advanceOrFinish()
             } label: {
                 label(primaryButtonTitle, fullWidth: true)
             }
             .buttonStyle(.plain)
-            .disabled(page == quizPageIndex && onboardingQuizSelection != onboardingQuizCorrectLetter)
-            .opacity(page == quizPageIndex && onboardingQuizSelection != onboardingQuizCorrectLetter ? 0.45 : 1)
         }
     }
 
     private var primaryButtonTitle: String {
         switch page {
-        case 7: return "Join 9 Million Students"
+        case 7: return "Join 1 Million Students"
         default: return "Continue"
         }
     }
@@ -187,31 +228,42 @@ struct OnboardingCarouselView: View {
         }
     }
 
+    /// After an upload option is shown, advance after 3s (no Continue on this step).
+    private func scheduleUploadAutoAdvanceIfNeeded() {
+        uploadAutoAdvanceTask?.cancel()
+        uploadAutoAdvanceTask = nil
+        guard page == uploadPageIndex, onboardingUploadSelection != nil else { return }
+        uploadAutoAdvanceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled, page == uploadPageIndex else { return }
+            advanceOrFinish()
+        }
+    }
+
     // MARK: - Page 1: Flashcards
 
     private var flashcardsPage: some View {
         OnboardingPageContainer {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Master your terms.")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(OnboardingTheme.primaryText)
-                Text("Memorize key concepts with spaced repetition")
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(OnboardingTheme.secondaryText)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Spacer(minLength: 8)
-
-            flashcard
-                .onTapGesture {
-                    withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-                        flashcardFlipped.toggle()
-                    }
+            VStack(alignment: .leading, spacing: onboardingHeaderToBodySpacing) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Master your terms.")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(OnboardingTheme.primaryText)
+                    Text("Memorize key concepts with spaced repetition")
+                        .font(.system(size: 16, weight: .regular))
+                        .foregroundStyle(OnboardingTheme.secondaryText)
                 }
-                .padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 8)
+                flashcard
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                            flashcardFlipped.toggle()
+                        }
+                    }
+                    .padding(.horizontal, 4)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -254,54 +306,53 @@ struct OnboardingCarouselView: View {
 
     private var notesPage: some View {
         OnboardingPageContainer {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("We'll create beautiful notes for you.")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(OnboardingTheme.primaryText)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: onboardingHeaderToBodySpacing) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("We'll create beautiful notes for you.")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(OnboardingTheme.primaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 8)
-
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(OnboardingTheme.card)
-                .overlay(
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "doc.text.fill")
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(OnboardingTheme.card)
+                    .overlay(
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "doc.text.fill")
+                                    .foregroundStyle(OnboardingTheme.accent)
+                                Text("Biology 101 — Molecular Biology")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(OnboardingTheme.secondaryText)
+                            }
+                            Text("Prokaryotes vs. Eukaryotes")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(OnboardingTheme.primaryText)
+                            Text("Overview")
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(OnboardingTheme.accent)
-                            Text("Biology 101 — Molecular Biology")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(OnboardingTheme.secondaryText)
+                            Text("Cells are categorized into two main groups with distinct structural differences.")
+                                .font(.subheadline)
+                                .foregroundStyle(OnboardingTheme.primaryText.opacity(0.88))
+                            HStack(spacing: 12) {
+                                cellChip(title: "Prokaryotic", subtitle: "Simple")
+                                cellChip(title: "Eukaryotic", subtitle: "Complex")
+                            }
+                            HStack(alignment: .top, spacing: 8) {
+                                Circle()
+                                    .fill(OnboardingTheme.accent)
+                                    .frame(width: 6, height: 6)
+                                    .padding(.top, 6)
+                                Text("Prokaryotic cells: no nucleus, simpler structure.")
+                                    .font(.footnote)
+                                    .foregroundStyle(OnboardingTheme.secondaryText)
+                            }
                         }
-                        Text("Prokaryotes vs. Eukaryotes")
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(OnboardingTheme.primaryText)
-                        Text("Overview")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(OnboardingTheme.accent)
-                        Text("Cells are categorized into two main groups with distinct structural differences.")
-                            .font(.subheadline)
-                            .foregroundStyle(OnboardingTheme.primaryText.opacity(0.88))
-                        HStack(spacing: 12) {
-                            cellChip(title: "Prokaryotic", subtitle: "Simple")
-                            cellChip(title: "Eukaryotic", subtitle: "Complex")
-                        }
-                        HStack(alignment: .top, spacing: 8) {
-                            Circle()
-                                .fill(OnboardingTheme.accent)
-                                .frame(width: 6, height: 6)
-                                .padding(.top, 6)
-                            Text("Prokaryotic cells: no nucleus, simpler structure.")
-                                .font(.footnote)
-                                .foregroundStyle(OnboardingTheme.secondaryText)
-                        }
-                    }
-                    .padding(20)
-                )
-                .frame(maxHeight: 360)
-
-            Spacer(minLength: 8)
+                        .padding(20)
+                    )
+                    .frame(maxHeight: 360)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -332,49 +383,48 @@ struct OnboardingCarouselView: View {
 
     private var quizPage: some View {
         OnboardingPageContainer {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Crush your exams.")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(OnboardingTheme.primaryText)
-                Text("Auto-generated quizzes help you retain what you've learned")
-                    .font(.system(size: 16))
+            VStack(alignment: .leading, spacing: onboardingHeaderToBodySpacing) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Crush your exams.")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(OnboardingTheme.primaryText)
+                    Text("Auto-generated quizzes help you retain what you've learned")
+                        .font(.system(size: 16))
+                        .foregroundStyle(OnboardingTheme.secondaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 16) {
+                    Group {
+                        if onboardingQuizSelection == nil {
+                            Text("Choose an answer")
+                        } else if onboardingQuizSelection == onboardingQuizCorrectLetter {
+                            Text("Nice — that's right!")
+                        } else {
+                            Text("Not quite — try another option")
+                        }
+                    }
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(OnboardingTheme.secondaryText)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Spacer(minLength: 8)
-
-            VStack(alignment: .leading, spacing: 16) {
-                Group {
-                    if onboardingQuizSelection == nil {
-                        Text("Choose an answer")
-                    } else if onboardingQuizSelection == onboardingQuizCorrectLetter {
-                        Text("Nice — that's right!")
-                    } else {
-                        Text("Not quite — try another option")
+                    Text("What is the primary function of mitochondria in a cell?")
+                        .font(.headline)
+                        .foregroundStyle(OnboardingTheme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(spacing: 10) {
+                        onboardingQuizOptionRow(letter: "A", text: "DNA replication")
+                        onboardingQuizOptionRow(letter: "B", text: "Energy production (ATP synthesis)")
+                        onboardingQuizOptionRow(letter: "C", text: "Protein folding")
+                        onboardingQuizOptionRow(letter: "D", text: "Photosynthesis")
                     }
                 }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(OnboardingTheme.secondaryText)
-                Text("What is the primary function of mitochondria in a cell?")
-                    .font(.headline)
-                    .foregroundStyle(OnboardingTheme.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                VStack(spacing: 10) {
-                    onboardingQuizOptionRow(letter: "A", text: "DNA replication")
-                    onboardingQuizOptionRow(letter: "B", text: "Energy production (ATP synthesis)")
-                    onboardingQuizOptionRow(letter: "C", text: "Protein folding")
-                    onboardingQuizOptionRow(letter: "D", text: "Photosynthesis")
-                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(OnboardingTheme.card)
+                )
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(OnboardingTheme.card)
-            )
-
-            Spacer(minLength: 8)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -423,61 +473,76 @@ struct OnboardingCarouselView: View {
 
     private var uploadPage: some View {
         OnboardingPageContainer {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Upload Anything")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(OnboardingTheme.primaryText)
-                Text("PDFs • YouTube Videos • Audio")
-                    .font(.subheadline)
-                    .foregroundStyle(OnboardingTheme.secondaryText)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Spacer(minLength: 12)
-
-            Button {
-                showOnboardingAddSheet = true
-            } label: {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(OnboardingTheme.card)
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(
-                            OnboardingTheme.accent,
-                            style: StrokeStyle(lineWidth: 2, dash: [8, 6])
-                        )
-                    VStack(spacing: 10) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 40))
-                            .foregroundStyle(OnboardingTheme.accent)
-                        Text("Tap for the same menu as + in Notes")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(OnboardingTheme.primaryText)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 20)
-                        Text("Record, link, or upload")
-                            .font(.caption)
-                            .foregroundStyle(OnboardingTheme.secondaryText)
-                    }
+            VStack(alignment: .leading, spacing: onboardingHeaderToBodySpacing) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Upload Anything")
+                        .font(.system(size: 28, weight: .bold))
+                        .foregroundStyle(OnboardingTheme.primaryText)
+                    Text("PDFs • YouTube Videos • Audio")
+                        .font(.subheadline)
+                        .foregroundStyle(OnboardingTheme.secondaryText)
                 }
-                .frame(height: 180)
-                .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button {
+                    showOnboardingAddSheet = true
+                } label: {
+                    Group {
+                        if let selection = onboardingUploadSelection {
+                            AddSheetOptionRowLabel(
+                                title: selection,
+                                subtitle: AddSheetAddOptionKind(title: selection)?.subtitle
+                            ) {
+                                AddSheetAddOptionIcons.icon(for: selection)
+                            }
+                        } else {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .fill(OnboardingTheme.card)
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .strokeBorder(
+                                        OnboardingTheme.accent,
+                                        style: StrokeStyle(lineWidth: 2, dash: [8, 6])
+                                    )
+                                VStack(spacing: 10) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(OnboardingTheme.accent)
+                                    Text("Tap to upload")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(OnboardingTheme.primaryText)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, 20)
+                                    Text("Record, link, or upload")
+                                        .font(.caption)
+                                        .foregroundStyle(OnboardingTheme.secondaryText)
+                                }
+                            }
+                            .frame(height: 180)
+                        }
+                    }
+                    .contentShape(
+                        RoundedRectangle(cornerRadius: onboardingUploadSelection == nil ? 20 : 16, style: .continuous)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if onboardingUploadSelection == nil {
+                    VStack(spacing: 8) {
+                        Text("Try it out!")
+                            .font(.headline)
+                            .foregroundStyle(OnboardingTheme.primaryText)
+                        Text("This is the add sheet you’ll use in the Notes tab after signing in.")
+                            .font(.subheadline)
+                            .foregroundStyle(OnboardingTheme.secondaryText)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 4)
+                }
             }
-            .buttonStyle(.plain)
-
-            Spacer(minLength: 20)
-
-            VStack(spacing: 8) {
-                Text("Try it out!")
-                    .font(.headline)
-                    .foregroundStyle(OnboardingTheme.primaryText)
-                Text("This is the add sheet you’ll use in the Notes tab after signing in.")
-                    .font(.subheadline)
-                    .foregroundStyle(OnboardingTheme.secondaryText)
-                    .multilineTextAlignment(.center)
-            }
-
-            Spacer(minLength: 8)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .offset(y: onboardingUploadPageVerticalNudge)
         }
     }
 
@@ -485,17 +550,17 @@ struct OnboardingCarouselView: View {
 
     private var rolePage: some View {
         OnboardingPageContainer {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("What describes you best?")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(OnboardingTheme.primaryText)
-                Text("We use this to personalize your experience :)")
-                    .font(.subheadline)
-                    .foregroundStyle(OnboardingTheme.secondaryText)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: onboardingHeaderToBodySpacing) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("What describes you best?")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(OnboardingTheme.primaryText)
+                    Text("We use this to personalize your experience :)")
+                        .font(.subheadline)
+                        .foregroundStyle(OnboardingTheme.secondaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            ScrollView(showsIndicators: false) {
                 VStack(spacing: 10) {
                     ForEach(roleOptions, id: \.self) { role in
                         selectionPill(role, selected: selectedRole == role) {
@@ -503,8 +568,8 @@ struct OnboardingCarouselView: View {
                         }
                     }
                 }
-                .padding(.top, 8)
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -519,12 +584,12 @@ struct OnboardingCarouselView: View {
 
     private var referralPage: some View {
         OnboardingPageContainer {
-            Text("How did you hear about us?")
-                .font(.system(size: 26, weight: .bold))
-                .foregroundStyle(OnboardingTheme.primaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: onboardingHeaderToBodySpacing) {
+                Text("How did you hear about us?")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(OnboardingTheme.primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            ScrollView(showsIndicators: false) {
                 VStack(spacing: 10) {
                     ForEach(referralOptions, id: \.self) { opt in
                         selectionPill(opt, selected: selectedReferral == opt) {
@@ -532,8 +597,8 @@ struct OnboardingCarouselView: View {
                         }
                     }
                 }
-                .padding(.top, 12)
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -564,24 +629,24 @@ struct OnboardingCarouselView: View {
 
     private var notificationsPage: some View {
         OnboardingPageContainer {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Never miss what matters")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(OnboardingTheme.primaryText)
-                Text("Get notified about things like…")
-                    .font(.subheadline)
-                    .foregroundStyle(OnboardingTheme.primaryText.opacity(0.85))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: onboardingHeaderToBodySpacing) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Never miss what matters")
+                        .font(.system(size: 26, weight: .bold))
+                        .foregroundStyle(OnboardingTheme.primaryText)
+                    Text("Get notified about things like…")
+                        .font(.subheadline)
+                        .foregroundStyle(OnboardingTheme.primaryText.opacity(0.85))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(spacing: 12) {
-                notificationRow(icon: "bell.fill", title: "Live Lectures", body: "Lecture starting — want a quick summary?")
-                notificationRow(icon: "calendar", title: "Study streaks", body: "You're on a roll — keep today's streak alive.")
-                notificationRow(icon: "bell.fill", title: "Quiz ready", body: "Your spaced-repetition deck is due.")
+                VStack(spacing: 12) {
+                    notificationRow(icon: "bell.fill", title: "Live Lectures", body: "Lecture starting — want a quick summary?")
+                    notificationRow(icon: "calendar", title: "Study streaks", body: "You're on a roll — keep today's streak alive.")
+                    notificationRow(icon: "bell.fill", title: "Quiz ready", body: "Your spaced-repetition deck is due.")
+                }
             }
-            .padding(.top, 8)
-
-            Spacer(minLength: 8)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -609,115 +674,119 @@ struct OnboardingCarouselView: View {
 
     private var socialProofPage: some View {
         OnboardingPageContainer {
-            VStack(spacing: 6) {
-                Text("9 Million")
-                    .font(.system(size: 36, weight: .bold))
-                    .foregroundStyle(OnboardingTheme.accent.opacity(0.85))
-                Text("Students trust Socrani")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(OnboardingTheme.primaryText)
+            VStack(alignment: .center, spacing: 12) {
+                VStack(spacing: 4) {
+                    Text("1 Million")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(OnboardingTheme.accent.opacity(0.85))
+                    Text("Students trust Socrani")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(OnboardingTheme.primaryText)
+                }
+                .frame(maxWidth: .infinity)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    testimonialCard(
+                        initials: "AR",
+                        name: "Alex Rodriguez",
+                        school: "UC Berkeley",
+                        quote: "Practice quizzes help me retain material—finally felt confident for exams."
+                    )
+                    testimonialCard(
+                        initials: "SK",
+                        name: "Sarah Kim",
+                        school: "New York University",
+                        quote: "Clear notes I can study from. No more rewriting slides at 2 a.m.",
+                        avatarColor: Color.purple.opacity(0.75)
+                    )
+                    testimonialCard(
+                        initials: "JL",
+                        name: "Jordan Lee",
+                        school: "UT Austin",
+                        quote: "Flashcards from my own files changed how I prep for midterms.",
+                        avatarColor: Color.orange.opacity(0.8)
+                    )
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity)
-
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(OnboardingTheme.card)
-                .frame(height: 100)
-                .overlay(
-                    HStack(spacing: 12) {
-                        Image(systemName: "leaf.fill")
-                            .font(.title2)
-                            .foregroundStyle(OnboardingTheme.gold)
-                        VStack(spacing: 4) {
-                            Text("4.8")
-                                .font(.system(size: 28, weight: .bold))
-                                .foregroundStyle(OnboardingTheme.primaryText)
-                            HStack(spacing: 2) {
-                                ForEach(0..<5, id: \.self) { _ in
-                                    Image(systemName: "star.fill")
-                                        .font(.caption)
-                                        .foregroundStyle(OnboardingTheme.gold)
-                                }
-                            }
-                            Text("25K+ App Ratings")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(OnboardingTheme.gold.opacity(0.9))
-                        }
-                        Image(systemName: "leaf.fill")
-                            .font(.title2)
-                            .foregroundStyle(OnboardingTheme.gold)
-                            .scaleEffect(x: -1, y: 1)
-                    }
-                )
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("What students are saying")
-                    .font(.headline)
-                    .foregroundStyle(OnboardingTheme.primaryText)
-                testimonialCard(
-                    initials: "AR",
-                    name: "Alex Rodriguez",
-                    school: "UC Berkeley",
-                    quote: "The practice quizzes actually help me retain what I study. Finally felt confident going into exams."
-                )
-                .frame(height: 200)
-            }
-
-            Spacer(minLength: 4)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 
-    private func testimonialCard(initials: String, name: String, school: String, quote: String) -> some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .fill(OnboardingTheme.card)
-            .overlay(
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        ZStack {
-                            Circle()
-                                .fill(Color.teal.opacity(0.85))
-                                .frame(width: 44, height: 44)
-                            Text(initials)
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.white)
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(name)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(OnboardingTheme.primaryText)
-                            Text(school)
-                                .font(.caption)
-                                .foregroundStyle(OnboardingTheme.secondaryText)
-                        }
-                        Spacer()
-                        HStack(spacing: 2) {
-                            ForEach(0..<5, id: \.self) { _ in
-                                Image(systemName: "star.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(OnboardingTheme.gold)
-                            }
-                        }
-                    }
-                    Text("\"\(quote)\"")
-                        .font(.subheadline)
-                        .foregroundStyle(OnboardingTheme.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+    private func testimonialCard(
+        initials: String,
+        name: String,
+        school: String,
+        quote: String,
+        avatarColor: Color = Color.teal.opacity(0.85)
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(avatarColor)
+                        .frame(width: 36, height: 36)
+                    Text(initials)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
                 }
-                .padding(16)
-            )
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(OnboardingTheme.primaryText)
+                    Text(school)
+                        .font(.caption2)
+                        .foregroundStyle(OnboardingTheme.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                Spacer(minLength: 4)
+                HStack(spacing: 1) {
+                    ForEach(0..<5, id: \.self) { _ in
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(OnboardingTheme.gold)
+                    }
+                }
+            }
+            Text("\"\(quote)\"")
+                .font(.caption)
+                .foregroundStyle(OnboardingTheme.secondaryText)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(OnboardingTheme.card)
+        )
     }
 }
 
 // MARK: - Layout wrapper
 
+/// Vertically centers page content in the area between the progress header and the bottom bar. Short pages look
+/// centered; tall pages scroll. Uses a single `ScrollView` with `minHeight` (common pattern) — avoid nested
+/// `ScrollView`s in `content` so this remains the only vertical scroll.
 private struct OnboardingPageContainer<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(spacing: 0) {
-            content()
-                .padding(.horizontal, 24)
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    content()
+                        .padding(.horizontal, 24)
+                    Spacer(minLength: 0)
+                }
+                .frame(minWidth: geo.size.width, minHeight: geo.size.height, alignment: .center)
+            }
+            .scrollIndicators(.hidden)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 

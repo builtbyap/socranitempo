@@ -67,6 +67,12 @@ struct ContentView: View {
             didRegisterCampaignTrigger = true
             registerSuperwallPlacement(SuperwallPlacements.campaignTrigger)
         }
+        .onAppear {
+            store.freeTierAuth = auth
+        }
+        .onChange(of: auth.syncUserId) { _, _ in
+            store.freeTierAuth = auth
+        }
         .onChange(of: selectedScreen) { _, new in
             if new != .study {
                 store.hidesStudyTabTitleBarForSession = false

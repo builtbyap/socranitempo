@@ -7,6 +7,7 @@ import Combine
 import Foundation
 import OSLog
 import Supabase
+import SuperwallKit
 
 /// Controls whether Fly APIs produce markdown notes, a flashcard deck, or a multiple-choice quiz (Study tab).
 enum StudyGenerationOutput: String, Sendable {
@@ -22,6 +23,9 @@ final class StudyStore: ObservableObject {
     /// When set, study data is loaded from and pushed to Supabase for `cloudUserId`.
     private var cloudClient: SupabaseClient?
     private var cloudUserId: UUID?
+
+    /// Free-tier quotas read subscription fields from this session (weak to avoid retain cycles).
+    weak var freeTierAuth: AuthSessionManager?
 
     @Published var notes: [StudyNote]
     @Published var decks: [StudyDeck]
@@ -54,6 +58,7 @@ final class StudyStore: ObservableObject {
     func configureCloudSync(client: SupabaseClient?, userId: UUID?) {
         cloudClient = client
         cloudUserId = userId
+        FreeTierUsageTracker.shared.configure(userId: userId)
     }
 
     /// After sign-in, moves server study rows to this session if another auth account exists with the same
@@ -88,6 +93,40 @@ final class StudyStore: ObservableObject {
         decks = []
         quizzes = []
         recordings = []
+        freeTierAuth = nil
+    }
+
+    private var freeTierSubscription: (status: String?, type: String?) {
+        (
+            freeTierAuth?.subscriptionStatusFromDB?.trimmingCharacters(in: .whitespacesAndNewlines),
+            freeTierAuth?.subscriptionTypeFromDB?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    @discardableResult
+    private func gateFreeTierOrPresentPaywall(
+        mode: StudyGenerationOutput,
+        origin: FreeTierGenerationOrigin
+    ) -> Bool {
+        guard FreeTierUsageTracker.shared.canStartGeneration(
+            mode: mode,
+            origin: origin,
+            subscriptionStatus: freeTierSubscription.status,
+            subscriptionType: freeTierSubscription.type
+        ) else {
+            registerSuperwallPlacement(SuperwallPlacements.freeTierLimit)
+            return false
+        }
+        return true
+    }
+
+    private func recordSuccessfulFreeTierIfApplicable(mode: StudyGenerationOutput, origin: FreeTierGenerationOrigin) {
+        FreeTierUsageTracker.shared.recordSuccessfulGeneration(
+            mode: mode,
+            origin: origin,
+            subscriptionStatus: freeTierSubscription.status,
+            subscriptionType: freeTierSubscription.type
+        )
     }
 
     /// Offline / no-Supabase mode: seed demo content once if everything is empty.
@@ -132,6 +171,10 @@ final class StudyStore: ObservableObject {
         let fallbackTitle = "Voice note · \(lengthLabel)"
         let mode = generationOutput
 
+        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .notesTabVoice) else {
+            return UUID()
+        }
+
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let audioURL = docs.appendingPathComponent(audioFilename)
 
@@ -149,7 +192,9 @@ final class StudyStore: ObservableObject {
                 }
                 let cleanedTitle = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let noteTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : fallbackTitle)
-                return addNote(title: noteTitle, body: body, tags: ["ai", "transcript", "voice"])
+                let id = addNote(title: noteTitle, body: body, tags: ["ai", "transcript", "voice"])
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .notesTabVoice)
+                return id
             case .flashcards:
                 guard let pairs = result.cards, !pairs.isEmpty else {
                     transcriptionError = "Could not generate flashcards from this audio."
@@ -158,7 +203,9 @@ final class StudyStore: ObservableObject {
                 let t = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let deckTitle = (t?.isEmpty == false ? t! : "Flashcards")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
-                return insertFlashcardDeck(title: deckTitle, topic: topic, pairs: pairs)
+                let id = insertFlashcardDeck(title: deckTitle, topic: topic, pairs: pairs)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .notesTabVoice)
+                return id
             case .quiz:
                 guard let qs = result.questions, !qs.isEmpty else {
                     transcriptionError = "Could not generate a quiz from this audio."
@@ -167,7 +214,9 @@ final class StudyStore: ObservableObject {
                 let t = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let quizTitle = (t?.isEmpty == false ? t! : "Quiz")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
-                return insertQuiz(title: quizTitle, topic: topic, questions: qs)
+                let id = insertQuiz(title: quizTitle, topic: topic, questions: qs)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .notesTabVoice)
+                return id
             }
         } catch {
             transcriptionError = error.localizedDescription
@@ -263,8 +312,10 @@ final class StudyStore: ObservableObject {
         let normalized = Self.normalizeURLString(trimmed)
         guard Self.isValidWebURL(normalized) else { return }
 
-        guard let recordingID = addRecordingFromLink(urlString: normalized) else { return }
         let mode = generationOutput
+        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .linkOrDocument) else { return }
+
+        guard let recordingID = addRecordingFromLink(urlString: normalized) else { return }
 
         transcriptionInProgress = true
         transcriptionError = nil
@@ -288,6 +339,7 @@ final class StudyStore: ObservableObject {
                 let noteTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : "Web notes")
                 let noteID = addNote(title: noteTitle, body: body, tags: tags)
                 linkGeneratedNote(noteID: noteID, toRecordingID: recordingID)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
             case .flashcards:
                 guard let pairs = result.cards, !pairs.isEmpty else {
                     transcriptionError = "Could not generate flashcards from this link."
@@ -296,6 +348,7 @@ final class StudyStore: ObservableObject {
                 let deckTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : "Flashcards")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertFlashcardDeck(title: deckTitle, topic: topic, pairs: pairs)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
             case .quiz:
                 guard let qs = result.questions, !qs.isEmpty else {
                     transcriptionError = "Could not generate a quiz from this link."
@@ -304,6 +357,7 @@ final class StudyStore: ObservableObject {
                 let quizTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : "Quiz")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertQuiz(title: quizTitle, topic: topic, questions: qs)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
             }
         } catch {
             transcriptionError = error.localizedDescription
@@ -320,8 +374,11 @@ final class StudyStore: ObservableObject {
     /// Imports document, adds a recording row, and generates notes (or flashcards/quiz) through Fly proxy.
     func addRecordingFromDocumentAndGenerateNotes(fileURL: URL) async {
         let savedURL = Self.copyPickedFileToDocuments(fileURL) ?? fileURL
-        let recordingID = insertDocumentRecordingRow(savedURL: savedURL)
+
         let mode = generationOutput
+        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .linkOrDocument) else { return }
+
+        let recordingID = insertDocumentRecordingRow(savedURL: savedURL)
 
         transcriptionInProgress = true
         transcriptionError = nil
@@ -342,6 +399,7 @@ final class StudyStore: ObservableObject {
                 let noteTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : fallbackTitle)
                 let noteID = addNote(title: noteTitle, body: body, tags: ["ai", "document"])
                 linkGeneratedNote(noteID: noteID, toRecordingID: recordingID)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
             case .flashcards:
                 guard let pairs = result.cards, !pairs.isEmpty else {
                     transcriptionError = "Could not generate flashcards from this document."
@@ -350,6 +408,7 @@ final class StudyStore: ObservableObject {
                 let deckTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : fallbackTitle)
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertFlashcardDeck(title: deckTitle, topic: topic, pairs: pairs)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
             case .quiz:
                 guard let qs = result.questions, !qs.isEmpty else {
                     transcriptionError = "Could not generate a quiz from this document."
@@ -358,6 +417,7 @@ final class StudyStore: ObservableObject {
                 let quizTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : fallbackTitle)
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertQuiz(title: quizTitle, topic: topic, questions: qs)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
             }
         } catch {
             transcriptionError = error.localizedDescription
@@ -453,8 +513,10 @@ final class StudyStore: ObservableObject {
 
     /// Saves the assistant recording and generates notes (or flashcards/quiz) from the audio via Fly proxy.
     func addMicrophoneRecordingAndGenerateNotes(duration: TimeInterval, audioFilename: String) async {
-        let recordingID = addMicrophoneRecording(duration: duration, audioFilename: audioFilename)
         let mode = generationOutput
+        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .assistantMicrophone) else { return }
+
+        let recordingID = addMicrophoneRecording(duration: duration, audioFilename: audioFilename)
 
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let audioURL = docs.appendingPathComponent(audioFilename)
@@ -476,6 +538,7 @@ final class StudyStore: ObservableObject {
                 let noteTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : "Lecture notes")
                 let noteID = addNote(title: noteTitle, body: body, tags: ["ai", "transcript"])
                 linkGeneratedNote(noteID: noteID, toRecordingID: recordingID)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .assistantMicrophone)
             case .flashcards:
                 guard let pairs = result.cards, !pairs.isEmpty else {
                     transcriptionError = "Could not generate flashcards from this recording."
@@ -485,6 +548,7 @@ final class StudyStore: ObservableObject {
                 let deckTitle = (t?.isEmpty == false ? t! : "Flashcards")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertFlashcardDeck(title: deckTitle, topic: topic, pairs: pairs)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .assistantMicrophone)
             case .quiz:
                 guard let qs = result.questions, !qs.isEmpty else {
                     transcriptionError = "Could not generate a quiz from this recording."
@@ -494,6 +558,7 @@ final class StudyStore: ObservableObject {
                 let quizTitle = (t?.isEmpty == false ? t! : "Quiz")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertQuiz(title: quizTitle, topic: topic, questions: qs)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .assistantMicrophone)
             }
         } catch {
             transcriptionError = error.localizedDescription

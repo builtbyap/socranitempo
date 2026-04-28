@@ -63,6 +63,13 @@ final class AuthSessionManager: ObservableObject {
     /// Name fetched from the `public.users` row (populated by `handle_new_user` trigger). Last-resort fallback for display name.
     @Published private(set) var publicUsersDisplayName: String?
 
+    /// `public.users.subscription_status` (snake case in DB).
+    @Published private(set) var subscriptionStatusFromDB: String?
+    /// `public.users.subscription_type` (e.g. `free` vs a paid product slug).
+    @Published private(set) var subscriptionTypeFromDB: String?
+    /// After the first `public.users` fetch for the current session; used to avoid flashing onboarding for entitled users.
+    @Published private(set) var isPublicUserProfileLoaded = false
+
     /// Google sign-in uses Supabase OAuth (PKCE + `ASWebAuthenticationSession`), not `grant_type=id_token`,
     /// so we avoid GoTrue’s Google iOS nonce checks (supabase/auth#1829).
     var canUseGoogleSignIn: Bool {
@@ -97,6 +104,7 @@ final class AuthSessionManager: ObservableObject {
                 await refreshUserFromServer(client: client)
             } else if session == nil {
                 serverSyncedUser = nil
+                clearPublicUserProfile()
             }
             if let session, event == .signedIn || event == .initialSession {
                 await ensureUserRowInDatabase(client: client, session: session)
@@ -111,19 +119,22 @@ final class AuthSessionManager: ObservableObject {
         } catch {
             Self.log.debug("auth.user() refresh failed: \(error.localizedDescription, privacy: .public)")
         }
-        await refreshPublicUsersDisplayName(client: client)
+        await refreshPublicUserProfile(client: client)
     }
 
-    /// Fetch name/full_name from public.users as a fallback when auth metadata has no name (common with Apple after first sign-in).
-    private func refreshPublicUsersDisplayName(client: SupabaseClient) async {
+    /// `public.users` row: name + subscription fields for paywall / onboarding routing.
+    private func refreshPublicUserProfile(client: SupabaseClient) async {
+        defer { isPublicUserProfileLoaded = true }
         guard let uid = session?.user.id else {
             publicUsersDisplayName = nil
+            subscriptionStatusFromDB = nil
+            subscriptionTypeFromDB = nil
             return
         }
         do {
-            let rows: [PublicUserNameRow] = try await client
+            let rows: [PublicUserProfileRow] = try await client
                 .from("users")
-                .select("name, full_name")
+                .select("name, full_name, subscription_status, subscription_type")
                 .eq("id", value: uid)
                 .limit(1)
                 .execute()
@@ -132,12 +143,39 @@ final class AuthSessionManager: ObservableObject {
                 let fn = row.fullName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 let n = row.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 publicUsersDisplayName = !fn.isEmpty ? fn : !n.isEmpty ? n : nil
+                subscriptionStatusFromDB = row.subscriptionStatus?.trimmingCharacters(in: .whitespacesAndNewlines)
+                subscriptionTypeFromDB = row.subscriptionType?.trimmingCharacters(in: .whitespacesAndNewlines)
             } else {
                 publicUsersDisplayName = nil
+                subscriptionStatusFromDB = nil
+                subscriptionTypeFromDB = nil
             }
         } catch {
-            Self.log.debug("public.users name fetch failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.debug("public.users profile fetch failed: \(error.localizedDescription, privacy: .public)")
+            publicUsersDisplayName = nil
+            subscriptionStatusFromDB = nil
+            subscriptionTypeFromDB = nil
         }
+    }
+
+    /// Skips the marketing onboarding when the user is signed in and `public.users` shows an **entitled** (non–free) subscription with a live status. Default rows are `active` + `free`; paid users should have `subscription_type` set to a product (e.g. `monthly`) by your billing integration.
+    var shouldSkipOnboardingForEntitledUser: Bool {
+        guard isSupabaseConfigured, isAuthenticated, isPublicUserProfileLoaded else { return false }
+        let status = (subscriptionStatusFromDB ?? "").lowercased()
+        let type = (subscriptionTypeFromDB ?? "free").lowercased()
+        if status == "canceled" || status == "cancelled" || status == "past_due" || status == "unpaid" {
+            return false
+        }
+        let statusOK = status == "active" || status == "trialing"
+        let notOnFreeOnlyTier = !type.isEmpty && type != "free"
+        return statusOK && notOnFreeOnlyTier
+    }
+
+    private func clearPublicUserProfile() {
+        publicUsersDisplayName = nil
+        subscriptionStatusFromDB = nil
+        subscriptionTypeFromDB = nil
+        isPublicUserProfileLoaded = false
     }
 
     func handleOpenURL(_ url: URL) {
@@ -251,7 +289,7 @@ final class AuthSessionManager: ObservableObject {
         guard let client else { return }
         do {
             serverSyncedUser = nil
-            publicUsersDisplayName = nil
+            clearPublicUserProfile()
             try await client.auth.signOut()
             UserDefaults.standard.set(false, forKey: Self.hasCompletedOnboardingKey)
         } catch {
@@ -270,6 +308,7 @@ final class AuthSessionManager: ObservableObject {
             UserDefaults.standard.removeObject(forKey: Self.siwaDisplayNameKey(uid))
             _ = try await client.rpc("delete_account_and_data").execute()
             serverSyncedUser = nil
+            clearPublicUserProfile()
             UserDefaults.standard.set(false, forKey: Self.hasCompletedOnboardingKey)
             // Auth row is gone; clear local session (may 401 if the session is already invalid).
             try? await client.auth.signOut()
@@ -366,12 +405,16 @@ private struct UserIdOnlyRow: Decodable {
     let id: UUID
 }
 
-private struct PublicUserNameRow: Decodable {
+private struct PublicUserProfileRow: Decodable {
     let name: String?
     let fullName: String?
+    let subscriptionStatus: String?
+    let subscriptionType: String?
     enum CodingKeys: String, CodingKey {
         case name
         case fullName = "full_name"
+        case subscriptionStatus = "subscription_status"
+        case subscriptionType = "subscription_type"
     }
 }
 

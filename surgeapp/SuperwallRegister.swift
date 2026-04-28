@@ -11,6 +11,8 @@ enum SuperwallPlacements {
     static let campaignTrigger = "campaign_trigger"
     static let upgradeTapped = "upgrade_tapped"
     static let manageSubscriptionTapped = "manage_subscription_tapped"
+    /// Add this placement in the Superwall dashboard (exact string) for free-tier quota bypass attempts.
+    static let freeTierLimit = "free_tier_limit"
 }
 
 private let paywallLog = Logger(
