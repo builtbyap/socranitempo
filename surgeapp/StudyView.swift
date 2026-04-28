@@ -199,12 +199,12 @@ struct StudyView: View {
             .onChange(of: store.transcriptionError) { _, newValue in
                 showTranscriptionError = (newValue != nil)
             }
-            .alert("Could not generate notes", isPresented: $showTranscriptionError) {
+            .alert("Please try again", isPresented: $showTranscriptionError) {
                 Button("OK", role: .cancel) {
                     store.transcriptionError = nil
                 }
             } message: {
-                Text(store.transcriptionError ?? "Please try again.")
+                Text(store.transcriptionError ?? StudyStore.generationFailureTryAgainMessage)
             }
             .navigationDestination(item: $deckToOpenFromAddSheet) { deck in
                 DeckSessionView(deck: deck)

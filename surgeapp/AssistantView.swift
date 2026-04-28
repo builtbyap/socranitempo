@@ -32,7 +32,7 @@ struct AssistantView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             List {
-                ForEach(Array(store.recordings.enumerated()), id: \.element.id) { index, recording in
+                ForEach(Array(store.assistantTabRecordings.enumerated()), id: \.element.id) { index, recording in
                     recordingRow(recording: recording, index: index)
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -108,7 +108,7 @@ struct AssistantView: View {
             .presentationCornerRadius(24)
         }
         .sheet(item: $presentedLinkMode) { mode in
-            WebsiteLinkInputSheet(mode: mode)
+            WebsiteLinkInputSheet(mode: mode, forAssistantTab: true)
                 .environmentObject(store)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
@@ -147,7 +147,7 @@ struct AssistantView: View {
                 onConfirm: { fileURL in
                     guard !isUploadingDocument else { return }
                     isUploadingDocument = true
-                    await store.addRecordingFromDocumentAndGenerateNotes(fileURL: fileURL)
+                    await store.addRecordingFromDocumentAndGenerateNotes(fileURL: fileURL, forAssistantTab: true)
                     isUploadingDocument = false
                     if store.transcriptionError == nil {
                         showDocumentConfirmSheet = false
@@ -178,12 +178,12 @@ struct AssistantView: View {
         .onChange(of: store.transcriptionError) { _, newValue in
             showTranscriptionError = (newValue != nil)
         }
-        .alert("Could not generate notes", isPresented: $showTranscriptionError) {
+        .alert("Please try again", isPresented: $showTranscriptionError) {
             Button("OK", role: .cancel) {
                 store.transcriptionError = nil
             }
         } message: {
-            Text(store.transcriptionError ?? "Please try again.")
+            Text(store.transcriptionError ?? StudyStore.generationFailureTryAgainMessage)
         }
         .alert("Camera unavailable", isPresented: $showCameraUnavailableAlert) {
             Button("OK", role: .cancel) {}
@@ -442,7 +442,7 @@ struct AssistantView: View {
 
         guard let imageURL else {
             isSolvingHomework = false
-            store.transcriptionError = "Could not prepare image for upload."
+            store.transcriptionError = StudyStore.generationFailureTryAgainMessage
             showTranscriptionError = true
             return
         }
@@ -467,7 +467,7 @@ struct AssistantView: View {
             )
             selectedGeneratedNote = solutionNote
         } catch {
-            store.transcriptionError = error.localizedDescription
+            store.transcriptionError = StudyStore.generationFailureTryAgainMessage
             showTranscriptionError = true
         }
     }
@@ -1563,6 +1563,8 @@ enum LinkInputMode: Identifiable {
 
 struct WebsiteLinkInputSheet: View {
     var mode: LinkInputMode = .website
+    /// When `true`, counts toward Assistant-tab session limits (link opened from Assistant).
+    var forAssistantTab: Bool = false
     @EnvironmentObject private var store: StudyStore
     @Environment(\.dismiss) private var dismiss
 
@@ -1668,7 +1670,7 @@ struct WebsiteLinkInputSheet: View {
         isSubmitting = true
         let submittedURL = urlText
         Task { @MainActor in
-            await store.addRecordingFromLinkAndGenerateNotes(urlString: submittedURL)
+            await store.addRecordingFromLinkAndGenerateNotes(urlString: submittedURL, forAssistantTab: forAssistantTab)
             isSubmitting = false
             if store.transcriptionError == nil {
                 dismiss()

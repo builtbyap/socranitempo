@@ -140,7 +140,8 @@ struct StudySyncService {
             updated_at: item.updatedAt,
             audio_filename: item.audioFilename,
             source_url: item.sourceURL,
-            generated_note_id: item.generatedNoteID
+            generated_note_id: item.generatedNoteID,
+            list_origin: item.listOrigin.rawValue
         )
         try await client
             .from("study_recordings")
@@ -215,9 +216,12 @@ private struct StudyRecordingDB: Codable {
     var audio_filename: String?
     var source_url: String?
     var generated_note_id: UUID?
+    /// When missing (legacy row), inferred from `audio_filename` (`assistant_` prefix) in `toModel()`.
+    var list_origin: String?
 
     func toModel() -> RecordingItem {
         let k = RecordingKind(rawValue: kind) ?? .other
+        let origin = Self.resolveListOrigin(stored: list_origin, audioFilename: audio_filename)
         return RecordingItem(
             id: id,
             title: title,
@@ -225,7 +229,18 @@ private struct StudyRecordingDB: Codable {
             updatedAt: updated_at,
             audioFilename: audio_filename,
             sourceURL: source_url,
-            generatedNoteID: generated_note_id
+            generatedNoteID: generated_note_id,
+            listOrigin: origin
         )
+    }
+
+    private static func resolveListOrigin(stored: String?, audioFilename: String?) -> RecordingListOrigin {
+        if let stored, let o = RecordingListOrigin(rawValue: stored) {
+            return o
+        }
+        if audioFilename?.hasPrefix("assistant_") == true {
+            return .assistant
+        }
+        return .notesAndStudy
     }
 }

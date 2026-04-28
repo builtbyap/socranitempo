@@ -7,18 +7,22 @@
 //  - `subscription_status` ∈ { active, trialing }.
 //  All other rows (including **`free`**, empty type, **monthly**/other SKUs) hit caps and quota paywalls.
 //
+//  Buckets:
+//  - Notes / flashcards / quizzes: AI generations (all tabs).
+//  - Assistant sessions: Assistant tab only (link, doc, or mic) — see `assistantTabSession`.
+//
 
 import Combine
 import Foundation
 
-/// Sources that drive which quota buckets count toward a Fly generation success.
+/// What produced a Fly-backed generation for quota accounting.
 enum FreeTierGenerationOrigin: Equatable {
-    /// Notes-tab mic → `addVoiceNoteAndGenerateNotes` (never counts toward assistant recording cap).
-    case notesTabVoice
-    /// Website / YouTube link or document import (Notes, Study, or Assistant add sheet).
-    case linkOrDocument
-    /// Assistant tab meeting/lecture mic → `addMicrophoneRecordingAndGenerateNotes`.
-    case assistantMicrophone
+    /// Voice on **Notes** or **Study** tabs only (no Assistant “session” bucket).
+    case notesOrStudyVoice
+    /// Website / YouTube / document from **Notes** or **Study** add sheets (mode buckets only).
+    case notesOrStudyLinkOrDocument
+    /// **Assistant** tab: website, YouTube, document, **or** meeting mic — uses Assistant session cap **and** mode buckets.
+    case assistantTabSession
 }
 
 @MainActor
@@ -62,7 +66,6 @@ final class FreeTierUsageTracker: ObservableObject {
         "trialing",
     ]
 
-    /// Unmetered usage for local quotas — **`subscription_type`** must be trial/pro/yearly (or annual) and status active/trialing.
     static func hasUnlimitedSubscriptionAccess(subscriptionStatus: String?, subscriptionType: String?) -> Bool {
         let s = (subscriptionStatus ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -76,7 +79,6 @@ final class FreeTierUsageTracker: ObservableObject {
         return true
     }
 
-    /// `true` whenever local caps apply (everyone except `hasUnlimitedSubscriptionAccess`).
     static func shouldApplyUsageLimits(subscriptionStatus: String?, subscriptionType: String?) -> Bool {
         !Self.hasUnlimitedSubscriptionAccess(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType)
     }
@@ -90,13 +92,24 @@ final class FreeTierUsageTracker: ObservableObject {
         return defaults.integer(forKey: key(uid))
     }
 
-    private func writeCount(_ value: Int, for key: (UUID) -> String) {
+    private func increment(_ keyFn: (UUID) -> String) {
         guard let uid = userId else { return }
-        defaults.set(value, forKey: key(uid))
+        let k = keyFn(uid)
+        let next = defaults.integer(forKey: k) + 1
+        defaults.set(next, forKey: k)
         objectWillChange.send()
     }
 
-    // MARK: - Gates (call before network / heavy work)
+    private func remainingUnderModeCap(_ mode: StudyGenerationOutput) -> Bool {
+        switch mode {
+        case .notes:
+            return readCount(for: Key.notes) < Self.maxNoteTranscriptions
+        case .flashcards:
+            return readCount(for: Key.flashcards) < Self.maxFlashcardGenerations
+        case .quiz:
+            return readCount(for: Key.quizzes) < Self.maxQuizGenerations
+        }
+    }
 
     /// Returns `true` if the user may start this generation (`false` triggers paywall).
     func canStartGeneration(
@@ -113,21 +126,12 @@ final class FreeTierUsageTracker: ObservableObject {
         }
 
         switch origin {
-        case .notesTabVoice:
-            if mode == .notes { return readCount(for: Key.notes) < Self.maxNoteTranscriptions }
-            if mode == .flashcards { return readCount(for: Key.flashcards) < Self.maxFlashcardGenerations }
-            return readCount(for: Key.quizzes) < Self.maxQuizGenerations
+        case .notesOrStudyVoice, .notesOrStudyLinkOrDocument:
+            return remainingUnderModeCap(mode)
 
-        case .linkOrDocument:
-            if mode == .notes { return readCount(for: Key.notes) < Self.maxNoteTranscriptions }
-            if mode == .flashcards { return readCount(for: Key.flashcards) < Self.maxFlashcardGenerations }
-            return readCount(for: Key.quizzes) < Self.maxQuizGenerations
-
-        case .assistantMicrophone:
+        case .assistantTabSession:
             guard readCount(for: Key.assistantRec) < Self.maxAssistantRecordingTranscriptions else { return false }
-            if mode == .notes { return readCount(for: Key.notes) < Self.maxNoteTranscriptions }
-            if mode == .flashcards { return readCount(for: Key.flashcards) < Self.maxFlashcardGenerations }
-            return readCount(for: Key.quizzes) < Self.maxQuizGenerations
+            return remainingUnderModeCap(mode)
         }
     }
 
@@ -141,8 +145,6 @@ final class FreeTierUsageTracker: ObservableObject {
         return readCount(for: Key.homeworkImages) < Self.maxHomeworkImageAnalyses
     }
 
-    // MARK: - Record success (call only after a successful AI generation)
-
     func recordSuccessfulGeneration(
         mode: StudyGenerationOutput,
         origin: FreeTierGenerationOrigin,
@@ -153,25 +155,23 @@ final class FreeTierUsageTracker: ObservableObject {
               userId != nil else { return }
 
         switch origin {
-        case .notesTabVoice, .linkOrDocument:
-            switch mode {
-            case .notes:
-                increment(Key.notes)
-            case .flashcards:
-                increment(Key.flashcards)
-            case .quiz:
-                increment(Key.quizzes)
-            }
-        case .assistantMicrophone:
+        case .notesOrStudyVoice, .notesOrStudyLinkOrDocument:
+            incrementModeOnly(mode)
+
+        case .assistantTabSession:
             increment(Key.assistantRec)
-            switch mode {
-            case .notes:
-                increment(Key.notes)
-            case .flashcards:
-                increment(Key.flashcards)
-            case .quiz:
-                increment(Key.quizzes)
-            }
+            incrementModeOnly(mode)
+        }
+    }
+
+    private func incrementModeOnly(_ mode: StudyGenerationOutput) {
+        switch mode {
+        case .notes:
+            increment(Key.notes)
+        case .flashcards:
+            increment(Key.flashcards)
+        case .quiz:
+            increment(Key.quizzes)
         }
     }
 
@@ -179,13 +179,5 @@ final class FreeTierUsageTracker: ObservableObject {
         guard Self.shouldApplyUsageLimits(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType),
               userId != nil else { return }
         increment(Key.homeworkImages)
-    }
-
-    private func increment(_ keyFn: (UUID) -> String) {
-        guard let uid = userId else { return }
-        let k = keyFn(uid)
-        let next = defaults.integer(forKey: k) + 1
-        defaults.set(next, forKey: k)
-        objectWillChange.send()
     }
 }

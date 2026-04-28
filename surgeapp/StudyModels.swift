@@ -87,6 +87,12 @@ struct StudyQuiz: Identifiable, Hashable, Codable {
     }
 }
 
+/// Which surface created this recording metadata row (`study_recordings`). Assistant tab history lists only `.assistant`.
+enum RecordingListOrigin: String, Hashable, Codable, Sendable {
+    case assistant
+    case notesAndStudy = "notes_and_study"
+}
+
 enum RecordingKind: String, CaseIterable, Identifiable, Hashable, Codable {
     case lecture
     case meeting
@@ -114,6 +120,8 @@ struct RecordingItem: Identifiable, Hashable, Codable {
     var sourceURL: String?
     /// Linked note ID when notes were generated from this recording item.
     var generatedNoteID: UUID?
+    /// Whether this row should appear in the Assistant tab history (not Notes/Study link or document imports).
+    var listOrigin: RecordingListOrigin
 
     init(
         id: UUID = UUID(),
@@ -122,7 +130,8 @@ struct RecordingItem: Identifiable, Hashable, Codable {
         updatedAt: Date = Date(),
         audioFilename: String? = nil,
         sourceURL: String? = nil,
-        generatedNoteID: UUID? = nil
+        generatedNoteID: UUID? = nil,
+        listOrigin: RecordingListOrigin = .notesAndStudy
     ) {
         self.id = id
         self.title = title
@@ -131,5 +140,6 @@ struct RecordingItem: Identifiable, Hashable, Codable {
         self.audioFilename = audioFilename
         self.sourceURL = sourceURL
         self.generatedNoteID = generatedNoteID
+        self.listOrigin = listOrigin
     }
 }

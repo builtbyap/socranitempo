@@ -20,12 +20,20 @@ enum StudyGenerationOutput: String, Sendable {
 final class StudyStore: ObservableObject {
     private static let log = Logger(subsystem: "com.socrani.surgeapp", category: "StudySync")
 
+    /// Friendly copy only — never expose raw NSError / HTTP text in alerts.
+    static let generationFailureTryAgainMessage = "We could not finish that. Please try again."
+
     /// When set, study data is loaded from and pushed to Supabase for `cloudUserId`.
     private var cloudClient: SupabaseClient?
     private var cloudUserId: UUID?
 
     /// Free-tier quotas read subscription fields from this session (weak to avoid retain cycles).
     weak var freeTierAuth: AuthSessionManager?
+
+    /// Recordings shown on the Assistant tab — excludes link/document/mic rows created from Notes or Study.
+    var assistantTabRecordings: [RecordingItem] {
+        recordings.filter { $0.listOrigin == .assistant }
+    }
 
     @Published var notes: [StudyNote]
     @Published var decks: [StudyDeck]
@@ -171,7 +179,7 @@ final class StudyStore: ObservableObject {
         let fallbackTitle = "Voice note · \(lengthLabel)"
         let mode = generationOutput
 
-        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .notesTabVoice) else {
+        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .notesOrStudyVoice) else {
             return UUID()
         }
 
@@ -193,37 +201,38 @@ final class StudyStore: ObservableObject {
                 let cleanedTitle = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let noteTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : fallbackTitle)
                 let id = addNote(title: noteTitle, body: body, tags: ["ai", "transcript", "voice"])
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .notesTabVoice)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .notesOrStudyVoice)
                 return id
             case .flashcards:
                 guard let pairs = result.cards, !pairs.isEmpty else {
-                    transcriptionError = "Could not generate flashcards from this audio."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return UUID()
                 }
                 let t = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let deckTitle = (t?.isEmpty == false ? t! : "Flashcards")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 let id = insertFlashcardDeck(title: deckTitle, topic: topic, pairs: pairs)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .notesTabVoice)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .notesOrStudyVoice)
                 return id
             case .quiz:
                 guard let qs = result.questions, !qs.isEmpty else {
-                    transcriptionError = "Could not generate a quiz from this audio."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return UUID()
                 }
                 let t = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let quizTitle = (t?.isEmpty == false ? t! : "Quiz")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 let id = insertQuiz(title: quizTitle, topic: topic, questions: qs)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .notesTabVoice)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .notesOrStudyVoice)
                 return id
             }
         } catch {
-            transcriptionError = error.localizedDescription
+            Self.log.error("addVoiceNoteAndGenerateNotes failed: \(error.localizedDescription, privacy: .public)")
+            transcriptionError = Self.generationFailureTryAgainMessage
             if mode == .notes {
                 return addNote(
                     title: fallbackTitle,
-                    body: "Recorded audio · \(lengthLabel)\n\nTranscription failed. Please try again.",
+                    body: "Recorded audio · \(lengthLabel)\n\n\(Self.generationFailureTryAgainMessage)",
                     tags: ["voice"]
                 )
             }
@@ -234,7 +243,7 @@ final class StudyStore: ObservableObject {
     func addRecording(title: String, kind: RecordingKind) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayTitle = trimmed.isEmpty ? "Untitled recording" : trimmed
-        let item = RecordingItem(title: displayTitle, kind: kind)
+        let item = RecordingItem(title: displayTitle, kind: kind, listOrigin: .notesAndStudy)
         recordings.insert(item, at: 0)
         scheduleCloud { s, u in try await s.upsertRecording(userId: u, item) }
     }
@@ -269,7 +278,7 @@ final class StudyStore: ObservableObject {
 
     /// Adds a recording row from a pasted website or YouTube URL.
     @discardableResult
-    func addRecordingFromLink(urlString: String) -> UUID? {
+    func addRecordingFromLink(urlString: String, listOrigin: RecordingListOrigin = .notesAndStudy) -> UUID? {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let normalized = Self.normalizeURLString(trimmed)
@@ -298,7 +307,8 @@ final class StudyStore: ObservableObject {
             kind: kind,
             updatedAt: Date(),
             audioFilename: nil,
-            sourceURL: normalized
+            sourceURL: normalized,
+            listOrigin: listOrigin
         )
         recordings.insert(item, at: 0)
         scheduleCloud { s, u in try await s.upsertRecording(userId: u, item) }
@@ -306,16 +316,21 @@ final class StudyStore: ObservableObject {
     }
 
     /// Adds URL row and generates notes (or flashcards/quiz) from a website/YouTube link through Fly proxy.
-    func addRecordingFromLinkAndGenerateNotes(urlString: String) async {
+    /// Set `forAssistantTab` when the flow is launched from the Assistant tab (counts toward Assistant session + mode).
+    func addRecordingFromLinkAndGenerateNotes(urlString: String, forAssistantTab: Bool = false) async {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let normalized = Self.normalizeURLString(trimmed)
         guard Self.isValidWebURL(normalized) else { return }
 
         let mode = generationOutput
-        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .linkOrDocument) else { return }
+        let origin: FreeTierGenerationOrigin = forAssistantTab ? .assistantTabSession : .notesOrStudyLinkOrDocument
+        guard gateFreeTierOrPresentPaywall(mode: mode, origin: origin) else { return }
 
-        guard let recordingID = addRecordingFromLink(urlString: normalized) else { return }
+        guard let recordingID = addRecordingFromLink(
+            urlString: normalized,
+            listOrigin: forAssistantTab ? .assistant : .notesAndStudy
+        ) else { return }
 
         transcriptionInProgress = true
         transcriptionError = nil
@@ -333,52 +348,56 @@ final class StudyStore: ObservableObject {
             case .notes:
                 let body = (result.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !body.isEmpty else {
-                    transcriptionError = "No content could be generated from this link."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return
                 }
                 let noteTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : "Web notes")
                 let noteID = addNote(title: noteTitle, body: body, tags: tags)
                 linkGeneratedNote(noteID: noteID, toRecordingID: recordingID)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: origin)
             case .flashcards:
                 guard let pairs = result.cards, !pairs.isEmpty else {
-                    transcriptionError = "Could not generate flashcards from this link."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return
                 }
                 let deckTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : "Flashcards")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertFlashcardDeck(title: deckTitle, topic: topic, pairs: pairs)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: origin)
             case .quiz:
                 guard let qs = result.questions, !qs.isEmpty else {
-                    transcriptionError = "Could not generate a quiz from this link."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return
                 }
                 let quizTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : "Quiz")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertQuiz(title: quizTitle, topic: topic, questions: qs)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: origin)
             }
         } catch {
-            transcriptionError = error.localizedDescription
+            Self.log.error("generateNotesFromURL failed: \(error.localizedDescription, privacy: .public)")
+            transcriptionError = Self.generationFailureTryAgainMessage
         }
     }
 
-    /// Adds a recording row from a picked document file.
     @discardableResult
     func addRecordingFromDocument(fileURL: URL) -> UUID {
         let savedURL = Self.copyPickedFileToDocuments(fileURL) ?? fileURL
-        return insertDocumentRecordingRow(savedURL: savedURL)
+        return insertDocumentRecordingRow(savedURL: savedURL, listOrigin: .notesAndStudy)
     }
 
     /// Imports document, adds a recording row, and generates notes (or flashcards/quiz) through Fly proxy.
-    func addRecordingFromDocumentAndGenerateNotes(fileURL: URL) async {
+    func addRecordingFromDocumentAndGenerateNotes(fileURL: URL, forAssistantTab: Bool = false) async {
         let savedURL = Self.copyPickedFileToDocuments(fileURL) ?? fileURL
 
         let mode = generationOutput
-        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .linkOrDocument) else { return }
+        let origin: FreeTierGenerationOrigin = forAssistantTab ? .assistantTabSession : .notesOrStudyLinkOrDocument
+        guard gateFreeTierOrPresentPaywall(mode: mode, origin: origin) else { return }
 
-        let recordingID = insertDocumentRecordingRow(savedURL: savedURL)
+        let recordingID = insertDocumentRecordingRow(
+            savedURL: savedURL,
+            listOrigin: forAssistantTab ? .assistant : .notesAndStudy
+        )
 
         transcriptionInProgress = true
         transcriptionError = nil
@@ -393,39 +412,40 @@ final class StudyStore: ObservableObject {
             case .notes:
                 let body = (result.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !body.isEmpty else {
-                    transcriptionError = "No content could be extracted from this document."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return
                 }
                 let noteTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : fallbackTitle)
                 let noteID = addNote(title: noteTitle, body: body, tags: ["ai", "document"])
                 linkGeneratedNote(noteID: noteID, toRecordingID: recordingID)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: origin)
             case .flashcards:
                 guard let pairs = result.cards, !pairs.isEmpty else {
-                    transcriptionError = "Could not generate flashcards from this document."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return
                 }
                 let deckTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : fallbackTitle)
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertFlashcardDeck(title: deckTitle, topic: topic, pairs: pairs)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: origin)
             case .quiz:
                 guard let qs = result.questions, !qs.isEmpty else {
-                    transcriptionError = "Could not generate a quiz from this document."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return
                 }
                 let quizTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : fallbackTitle)
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertQuiz(title: quizTitle, topic: topic, questions: qs)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .linkOrDocument)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: origin)
             }
         } catch {
-            transcriptionError = error.localizedDescription
+            Self.log.error("generateNotesFromDocument failed: \(error.localizedDescription, privacy: .public)")
+            transcriptionError = Self.generationFailureTryAgainMessage
         }
     }
 
     @discardableResult
-    private func insertDocumentRecordingRow(savedURL: URL) -> UUID {
+    private func insertDocumentRecordingRow(savedURL: URL, listOrigin: RecordingListOrigin) -> UUID {
         let title = savedURL.deletingPathExtension().lastPathComponent
         let displayTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Document"
@@ -435,7 +455,8 @@ final class StudyStore: ObservableObject {
             kind: .other,
             updatedAt: Date(),
             audioFilename: nil,
-            sourceURL: savedURL.absoluteString
+            sourceURL: savedURL.absoluteString,
+            listOrigin: listOrigin
         )
         recordings.insert(item, at: 0)
         scheduleCloud { s, u in try await s.upsertRecording(userId: u, item) }
@@ -504,7 +525,8 @@ final class StudyStore: ObservableObject {
             title: "Recording · \(lengthLabel)",
             kind: .meeting,
             updatedAt: Date(),
-            audioFilename: audioFilename
+            audioFilename: audioFilename,
+            listOrigin: .assistant
         )
         recordings.insert(item, at: 0)
         scheduleCloud { s, u in try await s.upsertRecording(userId: u, item) }
@@ -514,7 +536,7 @@ final class StudyStore: ObservableObject {
     /// Saves the assistant recording and generates notes (or flashcards/quiz) from the audio via Fly proxy.
     func addMicrophoneRecordingAndGenerateNotes(duration: TimeInterval, audioFilename: String) async {
         let mode = generationOutput
-        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .assistantMicrophone) else { return }
+        guard gateFreeTierOrPresentPaywall(mode: mode, origin: .assistantTabSession) else { return }
 
         let recordingID = addMicrophoneRecording(duration: duration, audioFilename: audioFilename)
 
@@ -531,37 +553,38 @@ final class StudyStore: ObservableObject {
             case .notes:
                 let body = (result.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !body.isEmpty else {
-                    transcriptionError = "No content could be generated from this recording."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return
                 }
                 let cleanedTitle = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let noteTitle = (cleanedTitle?.isEmpty == false ? cleanedTitle! : "Lecture notes")
                 let noteID = addNote(title: noteTitle, body: body, tags: ["ai", "transcript"])
                 linkGeneratedNote(noteID: noteID, toRecordingID: recordingID)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .assistantMicrophone)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .assistantTabSession)
             case .flashcards:
                 guard let pairs = result.cards, !pairs.isEmpty else {
-                    transcriptionError = "Could not generate flashcards from this recording."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return
                 }
                 let t = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let deckTitle = (t?.isEmpty == false ? t! : "Flashcards")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertFlashcardDeck(title: deckTitle, topic: topic, pairs: pairs)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .assistantMicrophone)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .assistantTabSession)
             case .quiz:
                 guard let qs = result.questions, !qs.isEmpty else {
-                    transcriptionError = "Could not generate a quiz from this recording."
+                    transcriptionError = Self.generationFailureTryAgainMessage
                     return
                 }
                 let t = result.title?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let quizTitle = (t?.isEmpty == false ? t! : "Quiz")
                 let topic = Self.nonEmptyTopicOrGeneral(result.topic)
                 _ = insertQuiz(title: quizTitle, topic: topic, questions: qs)
-                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .assistantMicrophone)
+                recordSuccessfulFreeTierIfApplicable(mode: mode, origin: .assistantTabSession)
             }
         } catch {
-            transcriptionError = error.localizedDescription
+            Self.log.error("addMicrophoneRecordingAndGenerateNotes failed: \(error.localizedDescription, privacy: .public)")
+            transcriptionError = Self.generationFailureTryAgainMessage
         }
     }
 
@@ -648,9 +671,9 @@ final class StudyStore: ObservableObject {
     ]
 
     static let sampleRecordings: [RecordingItem] = [
-        RecordingItem(title: "CS 101 — Week 4 lecture", kind: .lecture, updatedAt: .now),
-        RecordingItem(title: "Product sync", kind: .meeting, updatedAt: .now.addingTimeInterval(-86_400)),
-        RecordingItem(title: "Office hours Q&A", kind: .lecture, updatedAt: .now.addingTimeInterval(-3 * 86_400)),
-        RecordingItem(title: "Untitled recording", kind: .meeting, updatedAt: .now.addingTimeInterval(-10 * 86_400))
+        RecordingItem(title: "CS 101 — Week 4 lecture", kind: .lecture, updatedAt: .now, listOrigin: .assistant),
+        RecordingItem(title: "Product sync", kind: .meeting, updatedAt: .now.addingTimeInterval(-86_400), listOrigin: .assistant),
+        RecordingItem(title: "Office hours Q&A", kind: .lecture, updatedAt: .now.addingTimeInterval(-3 * 86_400), listOrigin: .assistant),
+        RecordingItem(title: "Untitled recording", kind: .meeting, updatedAt: .now.addingTimeInterval(-10 * 86_400), listOrigin: .assistant),
     ]
 }
