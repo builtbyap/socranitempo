@@ -15,7 +15,7 @@ struct AssistantView: View {
     @EnvironmentObject private var auth: AuthSessionManager
     @StateObject private var voiceRecorder = VoiceRecorder(destination: .assistant)
     @State private var showAddSheet = false
-    @State private var showLinkSheet = false
+    @State private var presentedLinkMode: LinkInputMode?
     @State private var showDocumentPicker = false
     @State private var showDocumentConfirmSheet = false
     @State private var pendingDocumentURL: URL?
@@ -24,7 +24,6 @@ struct AssistantView: View {
     @State private var selectedGeneratedNote: StudyNote?
     @State private var isSwitchBarVisible = false
     @State private var recordDragX: CGFloat = 0
-    @State private var linkMode: LinkInputMode = .website
     @State private var showCameraCapture = false
     @State private var showCameraUnavailableAlert = false
     @State private var showCameraPermissionDenied = false
@@ -86,16 +85,14 @@ struct AssistantView: View {
                 },
                 onWebsite: {
                     showAddSheet = false
-                    linkMode = .website
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        showLinkSheet = true
+                        presentedLinkMode = .website
                     }
                 },
                 onYouTube: {
                     showAddSheet = false
-                    linkMode = .youtube
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        showLinkSheet = true
+                        presentedLinkMode = .youtube
                     }
                 },
                 onUploadDocument: {
@@ -110,8 +107,8 @@ struct AssistantView: View {
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(24)
         }
-        .sheet(isPresented: $showLinkSheet) {
-            WebsiteLinkInputSheet(mode: linkMode)
+        .sheet(item: $presentedLinkMode) { mode in
+            WebsiteLinkInputSheet(mode: mode)
                 .environmentObject(store)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
@@ -1538,9 +1535,16 @@ struct AssistantAddOptionsSheet: View {
 
 // MARK: - Website / YouTube URL (Turbo-style bar)
 
-enum LinkInputMode {
+enum LinkInputMode: Identifiable {
     case website
     case youtube
+
+    var id: String {
+        switch self {
+        case .website: return "website"
+        case .youtube: return "youtube"
+        }
+    }
 
     var title: String {
         switch self {

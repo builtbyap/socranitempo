@@ -51,8 +51,7 @@ struct StudyView: View {
     @EnvironmentObject private var store: StudyStore
     @StateObject private var voiceRecorder = VoiceRecorder(destination: .notes)
     @State private var showAddSheet = false
-    @State private var showLinkSheet = false
-    @State private var linkMode: LinkInputMode = .website
+    @State private var presentedLinkMode: LinkInputMode?
     @State private var showDocumentPicker = false
     @State private var showDocumentConfirmSheet = false
     @State private var pendingDocumentURL: URL?
@@ -111,16 +110,14 @@ struct StudyView: View {
                     },
                     onWebsite: {
                         showAddSheet = false
-                        linkMode = .website
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            showLinkSheet = true
+                            presentedLinkMode = .website
                         }
                     },
                     onYouTube: {
                         showAddSheet = false
-                        linkMode = .youtube
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            showLinkSheet = true
+                            presentedLinkMode = .youtube
                         }
                     },
                     onUploadDocument: {
@@ -148,8 +145,8 @@ struct StudyView: View {
                 .presentationContentInteraction(.scrolls)
                 .presentationCornerRadius(24)
             }
-            .sheet(isPresented: $showLinkSheet) {
-                WebsiteLinkInputSheet(mode: linkMode)
+            .sheet(item: $presentedLinkMode) { mode in
+                WebsiteLinkInputSheet(mode: mode)
                     .environmentObject(store)
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)

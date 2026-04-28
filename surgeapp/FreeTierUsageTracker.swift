@@ -2,9 +2,10 @@
 //  FreeTierUsageTracker.swift
 //  surgeapp
 //
-//  Local caps when `subscription_type` is **`free`** and **`subscription_status`**
-//  indicates “no paid access” — default signup free tier, inactive/canceled after trial, etc.
-//  Paid product types (`pro`, `yearly`, monthly, …) never hit limits or quota paywalls.
+//  Unlimited local usage **only** when `public.users` has:
+//  - `subscription_type` ∈ { trial, pro, yearly, annual } AND
+//  - `subscription_status` ∈ { active, trialing }.
+//  All other rows (including **`free`**, empty type, **monthly**/other SKUs) hit caps and quota paywalls.
 //
 
 import Combine
@@ -49,14 +50,20 @@ final class FreeTierUsageTracker: ObservableObject {
         objectWillChange.send()
     }
 
-    /// Quota gates apply whenever the user presents as **subscription_type `free`** and the status
-    /// reflects “no unlimited paid entitlement”: default free row, churn, expired trial (`inactive`),
-    /// cancellations, unpaid/ billing issues with no paid SKU, etc.
-    /// **Paid SKUs are never gated** (`t != "free"`).
-    ///
-    /// `subscription_status == "trialing"` is excluded — live paid trials normally use non-`free` types
-    /// from StoreKit/webhooks; if that ever overlaps `free`, we avoid wrongly throttling checkout trials.
-    static func isRestrictedFreeTier(subscriptionStatus: String?, subscriptionType: String?) -> Bool {
+    private static let unlimitedSubscriptionTypes: Set<String> = [
+        "trial",
+        "pro",
+        "yearly",
+        "annual",
+    ]
+
+    private static let entitledSubscriptionStatuses: Set<String> = [
+        "active",
+        "trialing",
+    ]
+
+    /// Unmetered usage for local quotas — **`subscription_type`** must be trial/pro/yearly (or annual) and status active/trialing.
+    static func hasUnlimitedSubscriptionAccess(subscriptionStatus: String?, subscriptionType: String?) -> Bool {
         let s = (subscriptionStatus ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -64,33 +71,18 @@ final class FreeTierUsageTracker: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
 
-        guard t == "free" else {
-            return false
-        }
-
-        if s == "trialing" {
-            return false
-        }
-
-        let restrictedStatusesNonEntitledFree: Set<String> = [
-            "active",
-            "inactive",
-            "expired",
-            "canceled",
-            "cancelled",
-            "paused",
-            "unpaid",
-            "past_due",
-            "billing_issue",
-            "incomplete",
-            "incomplete_expired",
-        ]
-
-        guard restrictedStatusesNonEntitledFree.contains(s) else {
-            return false
-        }
-
+        guard Self.entitledSubscriptionStatuses.contains(s) else { return false }
+        guard Self.unlimitedSubscriptionTypes.contains(t) else { return false }
         return true
+    }
+
+    /// `true` whenever local caps apply (everyone except `hasUnlimitedSubscriptionAccess`).
+    static func shouldApplyUsageLimits(subscriptionStatus: String?, subscriptionType: String?) -> Bool {
+        !Self.hasUnlimitedSubscriptionAccess(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType)
+    }
+
+    static func isRestrictedFreeTier(subscriptionStatus: String?, subscriptionType: String?) -> Bool {
+        Self.shouldApplyUsageLimits(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType)
     }
 
     private func readCount(for key: (UUID) -> String) -> Int {
@@ -106,16 +98,19 @@ final class FreeTierUsageTracker: ObservableObject {
 
     // MARK: - Gates (call before network / heavy work)
 
-    /// Returns `true` if the user may start this generation (or is not on the limited free tier).
+    /// Returns `true` if the user may start this generation (`false` triggers paywall).
     func canStartGeneration(
         mode: StudyGenerationOutput,
         origin: FreeTierGenerationOrigin,
         subscriptionStatus: String?,
         subscriptionType: String?
     ) -> Bool {
-        guard Self.isRestrictedFreeTier(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType),
-              userId != nil
-        else { return true }
+        guard Self.shouldApplyUsageLimits(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType) else {
+            return true
+        }
+        guard userId != nil else {
+            return true
+        }
 
         switch origin {
         case .notesTabVoice:
@@ -137,9 +132,12 @@ final class FreeTierUsageTracker: ObservableObject {
     }
 
     func canAnalyzeHomeworkImage(subscriptionStatus: String?, subscriptionType: String?) -> Bool {
-        guard Self.isRestrictedFreeTier(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType),
-              userId != nil
-        else { return true }
+        guard Self.shouldApplyUsageLimits(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType) else {
+            return true
+        }
+        guard userId != nil else {
+            return true
+        }
         return readCount(for: Key.homeworkImages) < Self.maxHomeworkImageAnalyses
     }
 
@@ -151,7 +149,7 @@ final class FreeTierUsageTracker: ObservableObject {
         subscriptionStatus: String?,
         subscriptionType: String?
     ) {
-        guard Self.isRestrictedFreeTier(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType),
+        guard Self.shouldApplyUsageLimits(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType),
               userId != nil else { return }
 
         switch origin {
@@ -178,7 +176,7 @@ final class FreeTierUsageTracker: ObservableObject {
     }
 
     func recordSuccessfulHomeworkImageAnalysis(subscriptionStatus: String?, subscriptionType: String?) {
-        guard Self.isRestrictedFreeTier(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType),
+        guard Self.shouldApplyUsageLimits(subscriptionStatus: subscriptionStatus, subscriptionType: subscriptionType),
               userId != nil else { return }
         increment(Key.homeworkImages)
     }
